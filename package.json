@@ -1,0 +1,28 @@
+{
+  "name": "friend-review-finder",
+  "version": "2.0.0",
+  "description": "Fix Steam friend reviews 500 error by rebuilding review list",
+  "main": "dist/steam-friend-reviews-fixer.user.js",
+  "scripts": {
+    "build": "node scripts/build.js",
+    "build:prod": "node scripts/build.js --production",
+    "test": "echo \"M1 测试：请在浏览器控制台运行 dist/frf-dev-test.js\" && node scripts/build.js"
+  },
+  "keywords": [
+    "steam",
+    "userscript",
+    "tampermonkey",
+    "reviews",
+    "fix"
+  ],
+  "author": "JohnS3248",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JohnS3248/FRF.git"
+  },
+  "bugs": {
+    "url": "https://github.com/JohnS3248/FRF/issues"
+  },
+  "homepage": "https://github.com/JohnS3248/FRF#readme"
+}

@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Build outputs (keep dist/ for distribution)
+*.user.js.map
+
+# Claude AI 相关
+.claude/
+
+# 调研文档和归档
+docs/
+archive/
+htmls/
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Temporary files
+*.tmp
+.cache/
+
+# Environment
+.env
+.env.local
