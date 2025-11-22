@@ -62,7 +62,8 @@ class ReviewExtractor {
 
       // 互动数据
       commentCount: this.extractCommentCount(html),
-      awardCount: this.extractAwardCount(html)
+      awardCount: this.extractAwardCount(html),
+      awards: this.extractAwards(html)  // 奖励图标列表
     };
 
     this.logger.debug('提取完整评测数据', {
@@ -301,6 +302,61 @@ class ReviewExtractor {
     }
 
     return total > 0 ? total : 0;
+  }
+
+  /**
+   * 提取奖励图标列表（用于UI显示）
+   * 返回每个奖励的图标URL、数量、名称
+   *
+   * Steam HTML结构分析：
+   * <div class="review_award tooltip" data-tooltip-html="...reaction_award_name&gt;金独角兽&lt;...">
+   *   <img class="review_award_icon" src="https://.../still/11.png"/>
+   *   <span class="review_award_count hidden">1</span>
+   * </div>
+   *
+   * 需要排除 more_btn：class="review_award more_btn tooltip"
+   *
+   * @param {string} html - 评测页面HTML
+   * @returns {Array<{iconUrl: string, count: number, name: string}>}
+   */
+  extractAwards(html) {
+    const awards = [];
+
+    // 提取 review_award_ctn 区域
+    const awardCtnMatch = html.match(/review_award_ctn">([\s\S]*?)(?:<\/div>\s*<\/div>\s*<\/div>|<div class="review_rate_bar)/);
+    if (!awardCtnMatch) {
+      return awards;
+    }
+
+    const awardHtml = awardCtnMatch[1];
+
+    // 分步提取：先找到每个 review_award div（排除 more_btn）
+    // 使用更宽松的正则，逐个提取信息
+    const awardDivPattern = /<div[^>]*class="review_award tooltip"[^>]*data-tooltip-html="([^"]*)"[^>]*>[\s\S]*?<img[^>]*class="review_award_icon"[^>]*src="([^"]+)"[^>]*\/>[\s\S]*?<span[^>]*class="review_award_count[^"]*"[^>]*>(\d+)<\/span>/g;
+
+    let match;
+    while ((match = awardDivPattern.exec(awardHtml)) !== null) {
+      const tooltipHtml = match[1];
+      const iconUrl = match[2];
+      const count = parseInt(match[3], 10);
+
+      // 从 tooltip HTML 中提取奖励名称（HTML转义格式）
+      // 格式：&lt;div class=&quot;reaction_award_name&quot;&gt;金独角兽&lt;/div&gt;
+      const nameMatch = tooltipHtml.match(/reaction_award_name[^>]*&gt;([^&]+)&lt;/);
+      const name = nameMatch ? nameMatch[1].trim() : '奖励';
+
+      // 使用动态图标（animated）替换静态图标（still）
+      const animatedIconUrl = iconUrl.replace('/still/', '/animated/');
+
+      awards.push({
+        name,
+        iconUrl: animatedIconUrl,
+        staticIconUrl: iconUrl,
+        count
+      });
+    }
+
+    return awards;
   }
 
   extractRecommendation(html) {
