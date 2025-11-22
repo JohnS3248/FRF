@@ -755,361 +755,24 @@ if (typeof window !== 'undefined') {
 }
 
 
-// ==================== src/core/ReviewListExtractor.js ====================
-
-/**
- * 好友评测列表提取器 - 新架构核心模块
- * 负责提取好友的所有评测游戏 ID 列表
- */
-
-class ReviewListExtractor {
-  constructor() {
-    this.logger = new Logger('ReviewListExtractor');
-  }
-
-  /**
-   * 提取好友的所有评测游戏 ID
-   * @param {string} steamId - 好友的 Steam ID
-   * @returns {Promise<Array<string>>} 游戏 App ID 数组
-   */
-  async extractFriendReviewGames(steamId) {
-    this.logger.debug(`开始提取好友 ${steamId} 的评测列表`);
-    this.logger.time(`提取好友 ${steamId}`);
-
-    try {
-      // 1. 访问第一页
-      const firstPageUrl = Constants.PROFILE_REVIEWS_URL(steamId, 1);
-      const firstPageHtml = await this.fetchPage(firstPageUrl);
-
-      // 2. 提取评测总数
-      const totalReviews = this.extractTotalReviews(firstPageHtml);
-
-      if (totalReviews === 0) {
-        this.logger.debug(`好友 ${steamId} 没有评测`);
-        this.logger.timeEnd(`提取好友 ${steamId}`);
-        return [];
-      }
-
-      // 3. 计算总页数
-      const totalPages = this.calculateTotalPages(totalReviews);
-      this.logger.debug(`好友 ${steamId} 共 ${totalReviews} 篇评测，${totalPages} 页`);
-
-      // 4. 提取第一页的游戏 ID
-      const allAppIds = this.parseAppIds(firstPageHtml);
-
-      // 5. 如果有多页，访问剩余页面
-      if (totalPages > 1) {
-        for (let page = 2; page <= totalPages; page++) {
-          const url = Constants.PROFILE_REVIEWS_URL(steamId, page);
-          const html = await this.fetchPage(url);
-          const appIds = this.parseAppIds(html);
-          allAppIds.push(...appIds);
-
-          // 延迟避免限流
-          await this.delay(Constants.PAGE_REQUEST_DELAY);
-        }
-      }
-
-      // 6. 去重
-      const uniqueAppIds = [...new Set(allAppIds)];
-
-      this.logger.debug(`好友 ${steamId} 评测了 ${uniqueAppIds.length} 款游戏`);
-      this.logger.timeEnd(`提取好友 ${steamId}`);
-
-      return uniqueAppIds;
-
-    } catch (error) {
-      this.logger.error(`提取好友 ${steamId} 失败`, error);
-      this.logger.timeEnd(`提取好友 ${steamId}`);
-      return [];
-    }
-  }
-
-  /**
-   * 从 HTML 中提取评测总数
-   * @param {string} html - 第一页的 HTML
-   * @returns {number} 评测总数
-   */
-  extractTotalReviews(html) {
-    const match = html.match(Constants.REGEX.TOTAL_REVIEWS);
-    if (match) {
-      return parseInt(match[1], 10);
-    }
-    return 0;
-  }
-
-  /**
-   * 计算总页数
-   * @param {number} totalReviews - 评测总数
-   * @returns {number} 总页数
-   */
-  calculateTotalPages(totalReviews) {
-    return Math.ceil(totalReviews / Constants.REVIEWS_PER_PAGE);
-  }
-
-  /**
-   * 从 HTML 中提取游戏 App ID
-   * @param {string} html - 页面 HTML
-   * @returns {Array<string>} App ID 数组
-   */
-  parseAppIds(html) {
-    const matches = [...html.matchAll(Constants.REGEX.APP_ID)];
-    const appIds = matches.map(m => m[1]);
-
-    // 去重
-    return [...new Set(appIds)];
-  }
-
-  /**
-   * 获取页面内容
-   * @param {string} url - 目标 URL
-   * @returns {Promise<string>} HTML 内容
-   */
-  async fetchPage(url) {
-    const fullUrl = url.startsWith('http') ? url : `${Constants.STEAM_COMMUNITY}${url}`;
-
-    const response = await fetch(fullUrl, {
-      credentials: 'include',
-      redirect: 'follow'
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-
-    return await response.text();
-  }
-
-  /**
-   * 延迟工具函数
-   */
-  delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-}
-
-if (typeof window !== 'undefined') {
-  window.FRF_ReviewListExtractor = ReviewListExtractor;
-}
-
-
-// ==================== src/core/SmartThrottler.js ====================
-
-/**
- * 固定延迟限流器 - v2.0 正式版
- *
- * 经过多轮测试验证的最优配置：
- * - BATCH_SIZE = 3, DELAY = 300ms
- * - 固定参数，不做自适应调整
- * - 接受个别慢响应（数据量大导致，无法避免）
- */
-
-class Throttler {
-  constructor() {
-    // 最优配置（经实测验证）
-    this.batchSize = 3;           // 每批处理 3 个好友
-    this.delay = 300;             // 批次间延迟 300ms
-
-    this.logger = new Logger('Throttler');
-  }
-
-  /**
-   * 获取批次大小
-   * @returns {number} 批次大小
-   */
-  getBatchSize() {
-    return this.batchSize;
-  }
-
-  /**
-   * 获取延迟时间
-   * @returns {number} 延迟时间（毫秒）
-   */
-  getDelay() {
-    return this.delay;
-  }
-}
-
-// 暴露到全局
-if (typeof window !== 'undefined') {
-  window.FRF_Throttler = Throttler;
-}
-
-
 // ==================== src/core/ReviewCache.js ====================
 
 /**
- * 评测字典缓存管理器 - v3.0 增强版
- * 负责构建、查询、持久化好友评测字典
+ * 评测字典缓存管理器 - v5.0 精简版
+ * 负责查询、持久化好友评测字典
  *
- * v3.0 新增：
- * - 分段构建：支持暂停/继续
- * - 断点续传：中断后可从上次位置继续
- * - 进度保存：实时保存已处理的好友数据
+ * 缓存通过快速搜索自动构建，无需手动调用 buildCache
  */
 
 class ReviewCache {
   constructor() {
     this.logger = new Logger('ReviewCache');
-    this.extractor = new ReviewListExtractor();
-    this.throttler = new Throttler(); // 限流器
 
     // 字典结构：{ steamId: [appId1, appId2, ...] }
     this.friendReviewsMap = {};
 
     // 缓存键
     this.cacheKey = `${Constants.CACHE_KEY_PREFIX}review_dict_${Constants.CACHE_VERSION}`;
-    this.progressKey = `${Constants.CACHE_KEY_PREFIX}build_progress_${Constants.CACHE_VERSION}`;
-
-    // 构建状态
-    this.isBuilding = false;
-    this.isPaused = false;
-    this.currentIndex = 0;
-    this.friendIds = [];
-    this.startTime = 0;
-
-    // 回调
-    this.onProgress = null;
-    this.onComplete = null;
-    this.onPause = null;
-  }
-
-  /**
-   * 构建所有好友的评测字典（支持断点续传）
-   * @param {Array<string>} friendIds - 好友 Steam ID 列表
-   * @param {Object} options - 配置选项
-   * @returns {Promise<Object>} 评测字典
-   */
-  async buildCache(friendIds, options = {}) {
-    // 兼容旧 API：如果第二个参数是函数，转换为 options
-    if (typeof options === 'function') {
-      options = { onProgress: options };
-    }
-
-    this.onProgress = options.onProgress || null;
-    this.onComplete = options.onComplete || null;
-    this.onPause = options.onPause || null;
-
-    this.logger.info('========================================');
-    this.logger.info('  📚 字典模式 - 构建评测字典');
-    this.logger.info('========================================');
-    this.logger.info('');
-
-    // 检查是否有未完成的构建进度
-    const savedProgress = this.loadBuildProgress();
-    if (savedProgress && savedProgress.friendIds.length === friendIds.length) {
-      this.logger.info(`🔄 检测到未完成的构建进度`);
-      this.logger.info(`   已处理: ${savedProgress.currentIndex}/${friendIds.length}`);
-      this.logger.info(`   是否继续? 调用 FRF.resumeBuild() 继续，或 FRF.clearProgress() 重新开始`);
-      this.logger.info('');
-
-      // 恢复状态
-      this.friendIds = savedProgress.friendIds;
-      this.currentIndex = savedProgress.currentIndex;
-      this.friendReviewsMap = savedProgress.data;
-      return this.friendReviewsMap;
-    }
-
-    // 全新构建
-    this.friendIds = friendIds;
-    this.currentIndex = 0;
-    this.friendReviewsMap = {};
-    this.startTime = Date.now();
-
-    this.logger.info(`开始构建评测字典，共 ${friendIds.length} 个好友`);
-
-    const batchSize = this.throttler.getBatchSize();
-    const delay = this.throttler.getDelay();
-    this.logger.info(`⚙️ 配置: 批次=${batchSize}, 延迟=${delay}ms`);
-    this.logger.info('');
-
-    this.isBuilding = true;
-    this.isPaused = false;
-
-    await this.processFriends();
-
-    return this.friendReviewsMap;
-  }
-
-  /**
-   * 处理好友列表（支持暂停）
-   */
-  async processFriends() {
-    const batchSize = this.throttler.getBatchSize();
-    const delay = this.throttler.getDelay();
-    const total = this.friendIds.length;
-
-    while (this.currentIndex < total) {
-      // 检查暂停
-      if (this.isPaused) {
-        this.logger.info(`⏸️ 已暂停 (${this.currentIndex}/${total})`);
-        this.saveBuildProgress();
-        if (this.onPause) {
-          this.onPause(this.currentIndex, total);
-        }
-        return;
-      }
-
-      // 获取当前批次
-      const batch = this.friendIds.slice(
-        this.currentIndex,
-        Math.min(this.currentIndex + batchSize, total)
-      );
-
-      // 并发处理当前批次
-      const promises = batch.map(steamId => this.processFriend(steamId));
-      await Promise.all(promises);
-
-      this.currentIndex += batch.length;
-
-      // 计算 ETA
-      const elapsed = Date.now() - this.startTime;
-      const avgPerFriend = elapsed / this.currentIndex;
-      const remaining = (total - this.currentIndex) * avgPerFriend;
-      const eta = this.formatTime(remaining);
-
-      // 进度回调
-      if (this.onProgress) {
-        this.onProgress(this.currentIndex, total, Object.keys(this.friendReviewsMap).length, eta);
-      }
-
-      // 每 9 个好友显示一次进度
-      if (this.currentIndex % 9 === 0 || this.currentIndex === total) {
-        this.logger.info(
-          `📊 进度: ${this.currentIndex}/${total}, ` +
-          `已收录: ${Object.keys(this.friendReviewsMap).length} 个好友, ` +
-          `预计剩余: ${eta}`
-        );
-      }
-
-      // 定期保存进度（每 30 个好友）
-      if (this.currentIndex % 30 === 0) {
-        this.saveBuildProgress();
-      }
-
-      // 批次延迟
-      if (this.currentIndex < total && !this.isPaused) {
-        await this.delay(delay);
-      }
-    }
-
-    // 构建完成
-    this.isBuilding = false;
-    this.clearBuildProgress();
-    this.saveToCache();
-
-    const elapsed = this.formatTime(Date.now() - this.startTime);
-    this.logger.info('');
-    this.logger.info('========================================');
-    this.logger.info('  ✅ 字典构建完成！');
-    this.logger.info('========================================');
-    this.logger.info(`📊 共收录 ${Object.keys(this.friendReviewsMap).length} 个好友的评测数据`);
-    this.logger.info(`⏱️ 总耗时: ${elapsed}`);
-    this.logger.info('');
-
-    if (this.onComplete) {
-      this.onComplete(this.friendReviewsMap);
-    }
   }
 
   /**
@@ -1251,10 +914,6 @@ class ReviewCache {
     } catch {
       return null;
     }
-  }
-
-  delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
   }
 }
 
@@ -4013,7 +3672,7 @@ if (typeof window !== 'undefined') {
 // ==================== src/main.js ====================
 
 /**
- * FRF - Friend Review Finder v4.2
+ * FRF - Friend Review Finder v5.0
  * 主程序
  *
  * 智能缓存架构：
@@ -4021,141 +3680,14 @@ if (typeof window !== 'undefined') {
  * - 渐进式缓存：快速搜索结果自动同步到缓存
  * - 后台更新：缓存命中时先显示，后台静默检查更新
  *
- * v4.2 改进：
- * - 移除完整字典构建（耗时且易过时）
- * - 新增后台静默更新机制
- * - 发现数据改动时提示用户刷新
+ * v5.0 改进：
+ * - 移除废弃的 FriendReviewFinder 类
+ * - 精简代码结构
+ * - 新增设置面板
  */
-
-class FriendReviewFinder {
-  constructor(appId) {
-    this.appId = String(appId); // 确保 appId 为字符串
-    this.logger = new Logger('Main');
-    this.cache = new ReviewCache();
-    this.steamAPI = new SteamAPI(this.appId);
-
-    this.reviews = [];
-    this.friends = [];
-  }
-
-  /**
-   * 核心方法：获取好友评测（优化版）
-   * @returns {Promise<Array>} 评测数据数组
-   */
-  async fetchReviews() {
-    this.logger.info('========================================');
-    this.logger.info('  FRF - Friend Review Finder v3.0');
-    this.logger.info('  字典模式 - 多游戏快速查询');
-    this.logger.info('========================================');
-
-    try {
-      // ========== 阶段 1：获取/加载字典 ==========
-      let cacheLoaded = this.cache.loadFromCache();
-
-      if (!cacheLoaded) {
-        this.logger.info('');
-        this.logger.info('🔄 首次使用，正在构建评测字典...');
-        this.logger.info('   （此过程需要 1-3 分钟，但只需执行一次）');
-        this.logger.info('');
-
-        // 获取好友列表
-        this.friends = await this.steamAPI.getFriendsList();
-
-        // 构建字典
-        await this.cache.buildCache(this.friends, (current, total, built) => {
-          if (current % 10 === 0 || current === total) {
-            this.logger.progress(current, total, `构建字典`);
-          }
-        });
-
-        this.logger.info('');
-        this.logger.info('✅ 字典构建完成！已缓存，下次使用将秒速启动');
-        this.logger.info('');
-
-      } else {
-        this.logger.info('✅ 从缓存加载字典（瞬间完成）');
-
-        // 显示缓存统计
-        const stats = this.cache.getCacheStats();
-        this.logger.info(`   📊 缓存信息: ${stats.friendsWithReviews} 个好友, ${stats.totalReviews} 篇评测, ${stats.cacheAge} 小时前更新`);
-        this.logger.info('');
-      }
-
-      // ========== 阶段 2：快速查询 ==========
-      this.logger.info(`🔍 正在查询游戏 ${this.appId} 的好友评测...`);
-
-      const matchedFriends = this.cache.findFriendsWithReview(this.appId);
-
-      if (matchedFriends.length === 0) {
-        this.logger.info('😢 没有好友评测过这款游戏');
-        this.logger.info('');
-        return [];
-      }
-
-      this.logger.info(`🎯 找到 ${matchedFriends.length} 个好友评测了这款游戏`);
-      this.logger.info('');
-
-      // ========== 阶段 3：获取详细数据 ==========
-      this.logger.info('📥 正在获取详细评测数据...');
-
-      this.reviews = await this.steamAPI.batchGetReviews(matchedFriends, (current, total, found) => {
-        if (current % 5 === 0 || current === total) {
-          this.logger.progress(current, total, `详细数据`);
-        }
-      });
-
-      // ========== 阶段 4：输出结果 ==========
-      this.logger.info('');
-      this.logger.info('========================================');
-      this.logger.info('  ✅ 查询完成！');
-      this.logger.info('========================================');
-
-      this.showResults();
-
-      // 保存到全局
-      window.frfReviews = this.reviews;
-      this.logger.info('💾 评测数据已保存到 window.frfReviews');
-      this.logger.info('');
-
-      return this.reviews;
-
-    } catch (error) {
-      this.logger.error('获取评测失败', error);
-      throw error;
-    }
-  }
-
-  /**
-   * 显示结果统计
-   */
-  showResults() {
-    const positive = this.reviews.filter(r => r.isPositive).length;
-    const negative = this.reviews.length - positive;
-
-    this.logger.info(`📊 找到 ${this.reviews.length} 篇评测`);
-    this.logger.info(`   👍 推荐: ${positive} 篇`);
-    this.logger.info(`   👎 不推荐: ${negative} 篇`);
-    this.logger.info('');
-
-    // 显示详细列表
-    if (this.reviews.length > 0) {
-      this.logger.info('📋 评测列表:');
-      this.logger.table(this.reviews.map((r, i) => ({
-        '#': i + 1,
-        '推荐': r.isPositive ? '👍' : '👎',
-        '时长': `${r.totalHours}h`,
-        '发布': r.publishDate,
-        '更新': r.updateDate || '-',
-        'Steam ID': r.steamId
-      })));
-    }
-  }
-}
 
 // ==================== 全局暴露 ====================
 if (typeof window !== 'undefined') {
-  window.FRF_FriendReviewFinder = FriendReviewFinder;
-
   // 全局辅助对象
   window.FRF = {
     /**
@@ -4198,20 +3730,43 @@ if (typeof window !== 'undefined') {
       console.log('');
 
       // 获取详细数据
-      const finder = new FriendReviewFinder(appId);
-      finder.cache = cache;
       const steamAPI = new SteamAPI(appId);
-      finder.reviews = await steamAPI.batchGetReviews(matchedFriends, (current, total, found) => {
+      const reviews = await steamAPI.batchGetReviews(matchedFriends, (current, total, found) => {
         if (current % 5 === 0 || current === total) {
           console.log(`📊 进度: ${current}/${total}`);
         }
       });
 
-      finder.showResults();
-      window.frfReviews = finder.reviews;
+      // 显示结果统计
+      const positive = reviews.filter(r => r.isPositive).length;
+      const negative = reviews.length - positive;
+
+      console.log('');
+      console.log('========================================');
+      console.log('  ✅ 查询完成！');
+      console.log('========================================');
+      console.log(`📊 找到 ${reviews.length} 篇评测`);
+      console.log(`   👍 推荐: ${positive} 篇`);
+      console.log(`   👎 不推荐: ${negative} 篇`);
+      console.log('');
+
+      // 显示详细列表
+      if (reviews.length > 0) {
+        console.log('📋 评测列表:');
+        console.table(reviews.map((r, i) => ({
+          '#': i + 1,
+          '推荐': r.isPositive ? '👍' : '👎',
+          '时长': `${r.totalHours}h`,
+          '发布': r.publishDate,
+          '更新': r.updateDate || '-',
+          'Steam ID': r.steamId
+        })));
+      }
+
+      window.frfReviews = reviews;
       console.log('💾 评测数据已保存到 window.frfReviews');
 
-      return finder;
+      return reviews;
     },
 
     /**
@@ -4260,7 +3815,7 @@ if (typeof window !== 'undefined') {
     },
 
     /**
-     * 快速模式 - 单游戏搜索（v3.0 新增）
+     * 快速模式 - 单游戏搜索
      */
     // 快速模式配置（已优化：基于实测数据）
     _quickConfig: {
@@ -4339,7 +3894,7 @@ if (typeof window !== 'undefined') {
      */
     help: function() {
       console.log('%c========================================', 'color: #47bfff; font-weight: bold;');
-      console.log('%c  📖 FRF v4.2 使用指南', 'color: #47bfff; font-weight: bold; font-size: 16px;');
+      console.log('%c  📖 FRF v5.0 使用指南', 'color: #47bfff; font-weight: bold; font-size: 16px;');
       console.log('%c========================================', 'color: #47bfff; font-weight: bold;');
       console.log('');
       console.log('%c🔧 自动模式（默认）:', 'color: #9c27b0; font-weight: bold;');
@@ -4879,9 +4434,9 @@ if (typeof window !== 'undefined') {
 
   // 欢迎信息
   console.log('%c========================================', 'color: #47bfff; font-weight: bold;');
-  console.log('%c  🚀 FRF v4.2 已加载', 'color: #47bfff; font-weight: bold; font-size: 16px;');
+  console.log('%c  🚀 FRF v' + Constants.VERSION + ' 已加载', 'color: #47bfff; font-weight: bold; font-size: 16px;');
   console.log('%c  Friend Review Finder', 'color: #47bfff;');
-  console.log('%c  智能缓存 + 后台更新', 'color: #e91e63; font-weight: bold;');
+  console.log('%c  智能缓存 + 设置面板', 'color: #e91e63; font-weight: bold;');
   console.log('%c========================================', 'color: #47bfff; font-weight: bold;');
   console.log('');
   console.log('📖 输入 %cFRF.help()%c 查看使用说明', 'color: #ff9800; font-weight: bold;', '');

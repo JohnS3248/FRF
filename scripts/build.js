@@ -19,20 +19,18 @@ const packageJson = JSON.parse(
 const VERSION = packageJson.version;
 console.log(`📌 版本号: ${VERSION}\n`);
 
-// 文件加载顺序（重要！）- v5.0 设置面板
+// 文件加载顺序（重要！）- v5.0 精简版
 const SOURCE_FILES = [
   'src/utils/constants.js',
   'src/utils/logger.js',
   'src/utils/validator.js',
   'src/core/ReviewExtractor.js',
-  'src/core/ReviewListExtractor.js',
-  'src/core/SmartThrottler.js',       // 限流器（字典模式）
-  'src/core/ReviewCache.js',          // 字典缓存
-  'src/core/QuickSearcher.js',        // 快速搜索（v3.0 新增）
+  'src/core/ReviewCache.js',          // 字典缓存（精简版）
+  'src/core/QuickSearcher.js',        // 快速搜索
   'src/core/SteamAPI.js',
-  'src/ui/UIRenderer.js',             // UI渲染器（v3.1 新增）
-  'src/ui/PageDetector.js',           // 页面检测器（v3.1 新增）
-  'src/ui/SettingsPanel.js',          // 设置面板（v4.2 新增）
+  'src/ui/UIRenderer.js',             // UI渲染器
+  'src/ui/PageDetector.js',           // 页面检测器
+  'src/ui/SettingsPanel.js',          // 设置面板
   'src/main.js'
 ];
 

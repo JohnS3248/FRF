@@ -1,175 +1,19 @@
 /**
- * 评测字典缓存管理器 - v3.0 增强版
- * 负责构建、查询、持久化好友评测字典
+ * 评测字典缓存管理器 - v5.0 精简版
+ * 负责查询、持久化好友评测字典
  *
- * v3.0 新增：
- * - 分段构建：支持暂停/继续
- * - 断点续传：中断后可从上次位置继续
- * - 进度保存：实时保存已处理的好友数据
+ * 缓存通过快速搜索自动构建，无需手动调用 buildCache
  */
 
 class ReviewCache {
   constructor() {
     this.logger = new Logger('ReviewCache');
-    this.extractor = new ReviewListExtractor();
-    this.throttler = new Throttler(); // 限流器
 
     // 字典结构：{ steamId: [appId1, appId2, ...] }
     this.friendReviewsMap = {};
 
     // 缓存键
     this.cacheKey = `${Constants.CACHE_KEY_PREFIX}review_dict_${Constants.CACHE_VERSION}`;
-    this.progressKey = `${Constants.CACHE_KEY_PREFIX}build_progress_${Constants.CACHE_VERSION}`;
-
-    // 构建状态
-    this.isBuilding = false;
-    this.isPaused = false;
-    this.currentIndex = 0;
-    this.friendIds = [];
-    this.startTime = 0;
-
-    // 回调
-    this.onProgress = null;
-    this.onComplete = null;
-    this.onPause = null;
-  }
-
-  /**
-   * 构建所有好友的评测字典（支持断点续传）
-   * @param {Array<string>} friendIds - 好友 Steam ID 列表
-   * @param {Object} options - 配置选项
-   * @returns {Promise<Object>} 评测字典
-   */
-  async buildCache(friendIds, options = {}) {
-    // 兼容旧 API：如果第二个参数是函数，转换为 options
-    if (typeof options === 'function') {
-      options = { onProgress: options };
-    }
-
-    this.onProgress = options.onProgress || null;
-    this.onComplete = options.onComplete || null;
-    this.onPause = options.onPause || null;
-
-    this.logger.info('========================================');
-    this.logger.info('  📚 字典模式 - 构建评测字典');
-    this.logger.info('========================================');
-    this.logger.info('');
-
-    // 检查是否有未完成的构建进度
-    const savedProgress = this.loadBuildProgress();
-    if (savedProgress && savedProgress.friendIds.length === friendIds.length) {
-      this.logger.info(`🔄 检测到未完成的构建进度`);
-      this.logger.info(`   已处理: ${savedProgress.currentIndex}/${friendIds.length}`);
-      this.logger.info(`   是否继续? 调用 FRF.resumeBuild() 继续，或 FRF.clearProgress() 重新开始`);
-      this.logger.info('');
-
-      // 恢复状态
-      this.friendIds = savedProgress.friendIds;
-      this.currentIndex = savedProgress.currentIndex;
-      this.friendReviewsMap = savedProgress.data;
-      return this.friendReviewsMap;
-    }
-
-    // 全新构建
-    this.friendIds = friendIds;
-    this.currentIndex = 0;
-    this.friendReviewsMap = {};
-    this.startTime = Date.now();
-
-    this.logger.info(`开始构建评测字典，共 ${friendIds.length} 个好友`);
-
-    const batchSize = this.throttler.getBatchSize();
-    const delay = this.throttler.getDelay();
-    this.logger.info(`⚙️ 配置: 批次=${batchSize}, 延迟=${delay}ms`);
-    this.logger.info('');
-
-    this.isBuilding = true;
-    this.isPaused = false;
-
-    await this.processFriends();
-
-    return this.friendReviewsMap;
-  }
-
-  /**
-   * 处理好友列表（支持暂停）
-   */
-  async processFriends() {
-    const batchSize = this.throttler.getBatchSize();
-    const delay = this.throttler.getDelay();
-    const total = this.friendIds.length;
-
-    while (this.currentIndex < total) {
-      // 检查暂停
-      if (this.isPaused) {
-        this.logger.info(`⏸️ 已暂停 (${this.currentIndex}/${total})`);
-        this.saveBuildProgress();
-        if (this.onPause) {
-          this.onPause(this.currentIndex, total);
-        }
-        return;
-      }
-
-      // 获取当前批次
-      const batch = this.friendIds.slice(
-        this.currentIndex,
-        Math.min(this.currentIndex + batchSize, total)
-      );
-
-      // 并发处理当前批次
-      const promises = batch.map(steamId => this.processFriend(steamId));
-      await Promise.all(promises);
-
-      this.currentIndex += batch.length;
-
-      // 计算 ETA
-      const elapsed = Date.now() - this.startTime;
-      const avgPerFriend = elapsed / this.currentIndex;
-      const remaining = (total - this.currentIndex) * avgPerFriend;
-      const eta = this.formatTime(remaining);
-
-      // 进度回调
-      if (this.onProgress) {
-        this.onProgress(this.currentIndex, total, Object.keys(this.friendReviewsMap).length, eta);
-      }
-
-      // 每 9 个好友显示一次进度
-      if (this.currentIndex % 9 === 0 || this.currentIndex === total) {
-        this.logger.info(
-          `📊 进度: ${this.currentIndex}/${total}, ` +
-          `已收录: ${Object.keys(this.friendReviewsMap).length} 个好友, ` +
-          `预计剩余: ${eta}`
-        );
-      }
-
-      // 定期保存进度（每 30 个好友）
-      if (this.currentIndex % 30 === 0) {
-        this.saveBuildProgress();
-      }
-
-      // 批次延迟
-      if (this.currentIndex < total && !this.isPaused) {
-        await this.delay(delay);
-      }
-    }
-
-    // 构建完成
-    this.isBuilding = false;
-    this.clearBuildProgress();
-    this.saveToCache();
-
-    const elapsed = this.formatTime(Date.now() - this.startTime);
-    this.logger.info('');
-    this.logger.info('========================================');
-    this.logger.info('  ✅ 字典构建完成！');
-    this.logger.info('========================================');
-    this.logger.info(`📊 共收录 ${Object.keys(this.friendReviewsMap).length} 个好友的评测数据`);
-    this.logger.info(`⏱️ 总耗时: ${elapsed}`);
-    this.logger.info('');
-
-    if (this.onComplete) {
-      this.onComplete(this.friendReviewsMap);
-    }
   }
 
   /**
@@ -311,10 +155,6 @@ class ReviewCache {
     } catch {
       return null;
     }
-  }
-
-  delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
   }
 }
 
