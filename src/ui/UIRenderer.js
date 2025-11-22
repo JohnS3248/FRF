@@ -315,7 +315,8 @@ class UIRenderer {
     const recommendText = review.isPositive ? '推荐' : '不推荐';
 
     // 截断过长的评测内容（安全截断，避免破坏HTML标签）
-    const maxContentLength = 300;
+    // 从设置读取截断长度，默认300
+    const maxContentLength = (window.FRF && window.FRF._uiConfig && window.FRF._uiConfig.contentTruncate) || 300;
     let displayContent = this.safeHTMLTruncate(review.reviewContent || '', maxContentLength);
 
     // 格式化有价值/欢乐人数（如果都为0则不显示）
