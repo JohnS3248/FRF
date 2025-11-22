@@ -378,7 +378,11 @@ class ReviewExtractor {
       // 评测内容（新增）
       reviewContent: this.extractReviewContent(html),
       helpfulCount: this.extractHelpfulCount(html),
-      funnyCount: this.extractFunnyCount(html)
+      funnyCount: this.extractFunnyCount(html),
+
+      // 互动数据
+      commentCount: this.extractCommentCount(html),
+      awardCount: this.extractAwardCount(html)
     };
 
     this.logger.debug('提取完整评测数据', {
@@ -552,6 +556,71 @@ class ReviewExtractor {
     }
 
     return 0;
+  }
+
+  /**
+   * 提取评论数
+   * 页面结构: <span id="commentthread_..._totalcount">16</span> 条留言
+   */
+  extractCommentCount(html) {
+    const patterns = [
+      // 中文：totalcount + 条留言
+      /commentthread_[^"]*_totalcount[^>]*>(\d+)<\/span>\s*条留言/,
+      // 英文：totalcount + Comments
+      /commentthread_[^"]*_totalcount[^>]*>(\d+)<\/span>\s*Comments?/i,
+      // 备用：直接匹配 totalcount
+      /_totalcount[^>]*>(\d+)</,
+      // 备用：直接匹配数字+留言
+      />(\d+)<\/span>\s*条留言/,
+      />(\d+)<\/span>\s*Comments?</i
+    ];
+
+    for (const pattern of patterns) {
+      const match = html.match(pattern);
+      if (match) {
+        return parseInt(match[1], 10);
+      }
+    }
+
+    return 0;
+  }
+
+  /**
+   * 提取奖励数
+   * 页面结构:
+   * - 每个奖励类型有一个 <span class="review_award_count">数字</span>
+   * - more_btn 的 data-count 是"隐藏的额外奖励类型数量"，不是总数
+   * - 正确算法：累加所有 review_award_count，但排除 more_btn 里的那个
+   *
+   * 例：57的纸房子评测
+   * - 显示的奖励：1+1+3+2+1+2+1+1+1 = 13
+   * - more_btn显示"8"表示还有8种隐藏奖励类型
+   * - 总奖励数 = 13（累加所有非more_btn的count）
+   */
+  extractAwardCount(html) {
+    // 提取 review_award_ctn 区域的HTML
+    const awardCtnMatch = html.match(/review_award_ctn">([\s\S]*?)<\/div>\s*<\/div>/);
+    if (!awardCtnMatch) {
+      return 0;
+    }
+
+    const awardHtml = awardCtnMatch[1];
+
+    // 累加所有 review_award_count 的数字
+    const countMatches = [...awardHtml.matchAll(/review_award_count[^>]*>(\d+)<\/span>/g)];
+    let total = 0;
+
+    for (const match of countMatches) {
+      total += parseInt(match[1], 10);
+    }
+
+    // 如果存在 more_btn，需要减去它显示的数字（因为那不是奖励数，是隐藏类型数）
+    const moreBtnMatch = awardHtml.match(/more_btn[^>]*>[\s\S]*?review_award_count[^>]*>(\d+)<\/span>/);
+    if (moreBtnMatch) {
+      total -= parseInt(moreBtnMatch[1], 10);
+    }
+
+    return total > 0 ? total : 0;
   }
 
   extractRecommendation(html) {
@@ -2173,7 +2242,7 @@ class UIRenderer {
           <span class="frf_helpful_text">${helpfulText}</span>
           <span class="frf_award">
             <img src="https://community.fastly.steamstatic.com/public/shared/images/award_icon_blue.svg" class="frf_award_icon">
-            <span>0</span>
+            <span>${review.awardCount || 0}</span>
           </span>
         </div>
         ` : ''}
@@ -2205,8 +2274,10 @@ class UIRenderer {
             </div>
           </div>
           <div class="frf_comment_area">
-            <span class="frf_comment_icon">💬</span>
-            <span class="frf_comment_count">0</span>
+            <svg class="frf_comment_icon" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M21 6h-2V3c0-1.1-.9-2-2-2H3c-1.1 0-2 .9-2 2v14l4-4h7v4c0 1.1.9 2 2 2h7l4 4V8c0-1.1-.9-2-2-2zM5 11c-.83 0-1.5-.67-1.5-1.5S4.17 8 5 8s1.5.67 1.5 1.5S5.83 11 5 11zm4 0c-.83 0-1.5-.67-1.5-1.5S8.17 8 9 8s1.5.67 1.5 1.5S9.83 11 9 11zm4 0c-.83 0-1.5-.67-1.5-1.5S12.17 8 13 8s1.5.67 1.5 1.5S13.83 11 13 11z"/>
+            </svg>
+            <span class="frf_comment_count">${review.commentCount || 0}</span>
           </div>
         </div>
       </div>
@@ -2696,7 +2767,10 @@ class UIRenderer {
       }
 
       .frf_comment_icon {
-        font-size: 14px;
+        width: 16px;
+        height: 16px;
+        opacity: 0.7;
+        flex-shrink: 0;
       }
 
       .frf_comment_count {

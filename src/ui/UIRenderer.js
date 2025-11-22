@@ -292,7 +292,7 @@ class UIRenderer {
           <span class="frf_helpful_text">${helpfulText}</span>
           <span class="frf_award">
             <img src="https://community.fastly.steamstatic.com/public/shared/images/award_icon_blue.svg" class="frf_award_icon">
-            <span>0</span>
+            <span>${review.awardCount || 0}</span>
           </span>
         </div>
         ` : ''}
@@ -324,8 +324,10 @@ class UIRenderer {
             </div>
           </div>
           <div class="frf_comment_area">
-            <span class="frf_comment_icon">💬</span>
-            <span class="frf_comment_count">0</span>
+            <svg class="frf_comment_icon" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M21 6h-2V3c0-1.1-.9-2-2-2H3c-1.1 0-2 .9-2 2v14l4-4h7v4c0 1.1.9 2 2 2h7l4 4V8c0-1.1-.9-2-2-2zM5 11c-.83 0-1.5-.67-1.5-1.5S4.17 8 5 8s1.5.67 1.5 1.5S5.83 11 5 11zm4 0c-.83 0-1.5-.67-1.5-1.5S8.17 8 9 8s1.5.67 1.5 1.5S9.83 11 9 11zm4 0c-.83 0-1.5-.67-1.5-1.5S12.17 8 13 8s1.5.67 1.5 1.5S13.83 11 13 11z"/>
+            </svg>
+            <span class="frf_comment_count">${review.commentCount || 0}</span>
           </div>
         </div>
       </div>
@@ -815,7 +817,10 @@ class UIRenderer {
       }
 
       .frf_comment_icon {
-        font-size: 14px;
+        width: 16px;
+        height: 16px;
+        opacity: 0.7;
+        flex-shrink: 0;
       }
 
       .frf_comment_count {
