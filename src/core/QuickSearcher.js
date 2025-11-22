@@ -340,6 +340,61 @@ class QuickSearcher {
     // 保存到全局
     window.frfQuickReviews = this.reviews;
     this.logger.info('💾 评测数据已保存到 window.frfQuickReviews');
+
+    // 同步到字典缓存
+    this.syncToDict();
+  }
+
+  /**
+   * 将快速模式结果同步到字典缓存
+   */
+  syncToDict() {
+    if (this.reviews.length === 0) return;
+
+    try {
+      const cacheKey = `${Constants.CACHE_KEY_PREFIX}review_dict_${Constants.CACHE_VERSION}`;
+      const cached = localStorage.getItem(cacheKey);
+
+      let dictData = {};
+      let timestamp = Date.now();
+
+      // 如果已有字典，先加载
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        dictData = parsed.data || {};
+        timestamp = parsed.timestamp || Date.now();
+      }
+
+      // 更新字典：将快速模式找到的评测同步进去
+      let updated = 0;
+      for (const review of this.reviews) {
+        const steamId = review.steamId;
+        const appId = review.appId;
+
+        if (!dictData[steamId]) {
+          dictData[steamId] = [];
+        }
+
+        if (!dictData[steamId].includes(appId)) {
+          dictData[steamId].push(appId);
+          updated++;
+        }
+      }
+
+      // 保存回 localStorage
+      if (updated > 0) {
+        const cacheData = {
+          version: Constants.CACHE_VERSION,
+          timestamp: timestamp,
+          data: dictData
+        };
+        localStorage.setItem(cacheKey, JSON.stringify(cacheData));
+        this.logger.info(`📚 已同步 ${updated} 条记录到字典缓存`);
+      }
+
+    } catch (error) {
+      this.logger.warn('同步到字典缓存失败', error);
+    }
   }
 
   /**
