@@ -76,6 +76,12 @@ class SettingsPanel {
     document.body.appendChild(this.overlayElement);
     document.body.appendChild(this.panelElement);
 
+    // 设置版本号（确保在运行时正确读取）
+    const versionSpan = this.panelElement.querySelector('#frf_version');
+    if (versionSpan) {
+      versionSpan.textContent = Constants.VERSION;
+    }
+
     // 绑定事件
     this.bindEvents();
   }
@@ -150,7 +156,7 @@ class SettingsPanel {
             <h3>关于</h3>
             <div class="frf_about_info">
               <p><strong>FRF - Friend Review Finder</strong></p>
-              <p>版本：<span id="frf_version">${Constants.VERSION}</span></p>
+              <p>版本：<span id="frf_version">-</span></p>
               <p>
                 <a href="https://github.com/JohnS3248/FRF" target="_blank">GitHub</a> ·
                 <a href="https://github.com/JohnS3248/FRF/issues" target="_blank">反馈问题</a>

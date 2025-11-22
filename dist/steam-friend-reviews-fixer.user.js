@@ -2,7 +2,7 @@
 // @name         Steam 好友评测修复工具
 // @name:en      Steam Friend Reviews Fixer
 // @namespace    https://github.com/JohnS3248/FRF
-// @version      5.1.0
+// @version      5.1.1
 // @description  自动修复 Steam 好友评测页面渲染 Bug，显示完整的好友评测列表
 // @description:en Auto-fix Steam friend reviews rendering bug, display complete friend review list
 // @author       JohnS3248
@@ -31,7 +31,7 @@
 
 const Constants = {
   // ==================== 版本信息 ====================
-  VERSION: '5.1.0',
+  VERSION: '5.1.1',
   CACHE_VERSION: 'v2', // 渐进式缓存版本
 
   // ==================== 请求配置 ====================
@@ -2898,6 +2898,12 @@ class SettingsPanel {
     document.body.appendChild(this.overlayElement);
     document.body.appendChild(this.panelElement);
 
+    // 设置版本号（确保在运行时正确读取）
+    const versionSpan = this.panelElement.querySelector('#frf_version');
+    if (versionSpan) {
+      versionSpan.textContent = Constants.VERSION;
+    }
+
     // 绑定事件
     this.bindEvents();
   }
@@ -2972,7 +2978,7 @@ class SettingsPanel {
             <h3>关于</h3>
             <div class="frf_about_info">
               <p><strong>FRF - Friend Review Finder</strong></p>
-              <p>版本：<span id="frf_version">${Constants.VERSION}</span></p>
+              <p>版本：<span id="frf_version">-</span></p>
               <p>
                 <a href="https://github.com/JohnS3248/FRF" target="_blank">GitHub</a> ·
                 <a href="https://github.com/JohnS3248/FRF/issues" target="_blank">反馈问题</a>
@@ -4194,6 +4200,7 @@ if (typeof window !== 'undefined') {
 
       try {
         // 决定使用哪种模式获取数据
+        // 注意：_fetchReviewsForUI 内部会边获取边渲染，返回时已渲染完成
         const reviews = await this._fetchReviewsForUI(appId, forceRefresh);
 
         if (reviews.length === 0) {
@@ -4203,8 +4210,8 @@ if (typeof window !== 'undefined') {
           return;
         }
 
-        // 渲染评测卡片
-        this._uiRenderer.renderAll(reviews);
+        // 渲染已在 _fetchReviewsForUI 内部完成，这里只需确保加载状态已隐藏
+        this._uiRenderer.hideLoading();
 
         console.log(`✅ 渲染完成，共 ${reviews.length} 条好友评测`);
 
