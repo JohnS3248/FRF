@@ -124,50 +124,77 @@ class UIRenderer {
   }
 
   /**
-   * 显示修复中提示（在原bug区域显示）
+   * 显示 FRF 欢迎横幅（进入好友评测页面立即显示）
    */
-  showFixingNotice() {
+  showWelcomeBanner() {
     // 确保样式已注入
     this.injectStyles();
 
-    // 在原来bug显示的位置（#apphub_InitialContent之后或其位置）显示提示
-    const initialContent = document.querySelector('#apphub_InitialContent');
-    const headerContent = document.querySelector('.apphub_HomeHeaderContent');
-
     // 检查是否已存在
-    if (document.querySelector('.frf_fixing_notice')) return;
+    if (document.querySelector('.frf_welcome_banner')) return;
 
-    const notice = document.createElement('div');
-    notice.className = 'frf_fixing_notice';
-    notice.innerHTML = `
-      <div class="frf_notice_content">
-        <img src="https://community.fastly.steamstatic.com/public/images/login/throbber.gif" alt="Loading">
-        <span class="frf_notice_text">正在检测好友评测...</span>
+    const banner = document.createElement('div');
+    banner.className = 'frf_welcome_banner';
+    banner.innerHTML = `
+      <div class="frf_banner_content">
+        <div class="frf_banner_icon">🚀</div>
+        <div class="frf_banner_text">
+          <div class="frf_banner_title">FRF 好友评测增强工具已启动</div>
+          <div class="frf_banner_desc">
+            <span class="frf_banner_item">• 检测到渲染问题将自动修复</span>
+            <span class="frf_banner_item">• 点击上方 <strong>FRF 刷新</strong> 按钮可使用增强阅读模式</span>
+          </div>
+        </div>
+        <button class="frf_banner_close" title="关闭提示">✕</button>
       </div>
     `;
 
-    // 找合适的插入位置
-    if (initialContent && initialContent.parentNode) {
-      initialContent.parentNode.insertBefore(notice, initialContent.nextSibling);
-      this.logger.info('显示修复提示（在 apphub_InitialContent 后）');
-    } else if (headerContent && headerContent.parentNode) {
-      headerContent.parentNode.insertBefore(notice, headerContent.nextSibling);
-      this.logger.info('显示修复提示（在 apphub_HomeHeaderContent 后）');
+    // 关闭按钮事件
+    banner.querySelector('.frf_banner_close').addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.hideWelcomeBanner();
+    });
+
+    // 找合适的插入位置（在筛选栏下方）
+    const filterArea = document.querySelector('.apphub_SectionFilter');
+    if (filterArea && filterArea.parentNode) {
+      filterArea.parentNode.insertBefore(banner, filterArea.nextSibling);
+      this.logger.info('显示欢迎横幅（在筛选栏后）');
     } else {
-      // 备选：添加到 body
-      document.body.appendChild(notice);
-      this.logger.info('显示修复提示（添加到 body）');
+      // 备选位置
+      const initialContent = document.querySelector('#apphub_InitialContent');
+      if (initialContent && initialContent.parentNode) {
+        initialContent.parentNode.insertBefore(banner, initialContent);
+        this.logger.info('显示欢迎横幅（在 apphub_InitialContent 前）');
+      }
     }
   }
 
   /**
-   * 隐藏修复中提示
+   * 隐藏欢迎横幅
+   */
+  hideWelcomeBanner() {
+    const banner = document.querySelector('.frf_welcome_banner');
+    if (banner) {
+      banner.remove();
+    }
+  }
+
+  /**
+   * 显示修复中提示（已废弃，保留兼容）
+   * @deprecated 使用 showWelcomeBanner 替代
+   */
+  showFixingNotice() {
+    // 改为显示欢迎横幅
+    this.showWelcomeBanner();
+  }
+
+  /**
+   * 隐藏修复中提示（已废弃，保留兼容）
+   * @deprecated 使用 hideWelcomeBanner 替代
    */
   hideFixingNotice() {
-    const notice = document.querySelector('.frf_fixing_notice');
-    if (notice) {
-      notice.remove();
-    }
+    this.hideWelcomeBanner();
   }
 
   /**
@@ -496,23 +523,66 @@ class UIRenderer {
     const style = document.createElement('style');
     style.id = 'frf_styles';
     style.textContent = `
-      /* FRF 修复提示 - 与加载状态完全一致的样式 */
-      .frf_fixing_notice {
-        padding: 40px;
-        text-align: center;
-        color: #8f98a0;
+      /* FRF 欢迎横幅 */
+      .frf_welcome_banner {
+        background: linear-gradient(135deg, rgba(103, 193, 245, 0.15) 0%, rgba(78, 180, 241, 0.1) 100%);
+        border: 1px solid rgba(103, 193, 245, 0.3);
+        border-radius: 4px;
+        margin: 10px 0 15px 0;
+        padding: 12px 16px;
       }
 
-      .frf_notice_content {
+      .frf_banner_content {
         display: flex;
         align-items: center;
-        justify-content: center;
-        gap: 10px;
+        gap: 12px;
       }
 
-      .frf_notice_text {
+      .frf_banner_icon {
+        font-size: 24px;
+        flex-shrink: 0;
+      }
+
+      .frf_banner_text {
+        flex: 1;
+      }
+
+      .frf_banner_title {
         font-size: 14px;
+        font-weight: bold;
+        color: #67c1f5;
+        margin-bottom: 4px;
+      }
+
+      .frf_banner_desc {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .frf_banner_item {
+        font-size: 12px;
+        color: #acb2b8;
+      }
+
+      .frf_banner_item strong {
+        color: #67c1f5;
+      }
+
+      .frf_banner_close {
+        background: transparent;
+        border: none;
         color: #8f98a0;
+        font-size: 16px;
+        cursor: pointer;
+        padding: 4px 8px;
+        border-radius: 2px;
+        transition: all 0.2s;
+      }
+
+      .frf_banner_close:hover {
+        background: rgba(255, 255, 255, 0.1);
+        color: #fff;
       }
 
       /* FRF 加载状态 */

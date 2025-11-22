@@ -2005,50 +2005,77 @@ class UIRenderer {
   }
 
   /**
-   * 显示修复中提示（在原bug区域显示）
+   * 显示 FRF 欢迎横幅（进入好友评测页面立即显示）
    */
-  showFixingNotice() {
+  showWelcomeBanner() {
     // 确保样式已注入
     this.injectStyles();
 
-    // 在原来bug显示的位置（#apphub_InitialContent之后或其位置）显示提示
-    const initialContent = document.querySelector('#apphub_InitialContent');
-    const headerContent = document.querySelector('.apphub_HomeHeaderContent');
-
     // 检查是否已存在
-    if (document.querySelector('.frf_fixing_notice')) return;
+    if (document.querySelector('.frf_welcome_banner')) return;
 
-    const notice = document.createElement('div');
-    notice.className = 'frf_fixing_notice';
-    notice.innerHTML = `
-      <div class="frf_notice_content">
-        <img src="https://community.fastly.steamstatic.com/public/images/login/throbber.gif" alt="Loading">
-        <span class="frf_notice_text">正在检测好友评测...</span>
+    const banner = document.createElement('div');
+    banner.className = 'frf_welcome_banner';
+    banner.innerHTML = `
+      <div class="frf_banner_content">
+        <div class="frf_banner_icon">🚀</div>
+        <div class="frf_banner_text">
+          <div class="frf_banner_title">FRF 好友评测增强工具已启动</div>
+          <div class="frf_banner_desc">
+            <span class="frf_banner_item">• 检测到渲染问题将自动修复</span>
+            <span class="frf_banner_item">• 点击上方 <strong>FRF 刷新</strong> 按钮可使用增强阅读模式</span>
+          </div>
+        </div>
+        <button class="frf_banner_close" title="关闭提示">✕</button>
       </div>
     `;
 
-    // 找合适的插入位置
-    if (initialContent && initialContent.parentNode) {
-      initialContent.parentNode.insertBefore(notice, initialContent.nextSibling);
-      this.logger.info('显示修复提示（在 apphub_InitialContent 后）');
-    } else if (headerContent && headerContent.parentNode) {
-      headerContent.parentNode.insertBefore(notice, headerContent.nextSibling);
-      this.logger.info('显示修复提示（在 apphub_HomeHeaderContent 后）');
+    // 关闭按钮事件
+    banner.querySelector('.frf_banner_close').addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.hideWelcomeBanner();
+    });
+
+    // 找合适的插入位置（在筛选栏下方）
+    const filterArea = document.querySelector('.apphub_SectionFilter');
+    if (filterArea && filterArea.parentNode) {
+      filterArea.parentNode.insertBefore(banner, filterArea.nextSibling);
+      this.logger.info('显示欢迎横幅（在筛选栏后）');
     } else {
-      // 备选：添加到 body
-      document.body.appendChild(notice);
-      this.logger.info('显示修复提示（添加到 body）');
+      // 备选位置
+      const initialContent = document.querySelector('#apphub_InitialContent');
+      if (initialContent && initialContent.parentNode) {
+        initialContent.parentNode.insertBefore(banner, initialContent);
+        this.logger.info('显示欢迎横幅（在 apphub_InitialContent 前）');
+      }
     }
   }
 
   /**
-   * 隐藏修复中提示
+   * 隐藏欢迎横幅
+   */
+  hideWelcomeBanner() {
+    const banner = document.querySelector('.frf_welcome_banner');
+    if (banner) {
+      banner.remove();
+    }
+  }
+
+  /**
+   * 显示修复中提示（已废弃，保留兼容）
+   * @deprecated 使用 showWelcomeBanner 替代
+   */
+  showFixingNotice() {
+    // 改为显示欢迎横幅
+    this.showWelcomeBanner();
+  }
+
+  /**
+   * 隐藏修复中提示（已废弃，保留兼容）
+   * @deprecated 使用 hideWelcomeBanner 替代
    */
   hideFixingNotice() {
-    const notice = document.querySelector('.frf_fixing_notice');
-    if (notice) {
-      notice.remove();
-    }
+    this.hideWelcomeBanner();
   }
 
   /**
@@ -2377,23 +2404,66 @@ class UIRenderer {
     const style = document.createElement('style');
     style.id = 'frf_styles';
     style.textContent = `
-      /* FRF 修复提示 - 与加载状态完全一致的样式 */
-      .frf_fixing_notice {
-        padding: 40px;
-        text-align: center;
-        color: #8f98a0;
+      /* FRF 欢迎横幅 */
+      .frf_welcome_banner {
+        background: linear-gradient(135deg, rgba(103, 193, 245, 0.15) 0%, rgba(78, 180, 241, 0.1) 100%);
+        border: 1px solid rgba(103, 193, 245, 0.3);
+        border-radius: 4px;
+        margin: 10px 0 15px 0;
+        padding: 12px 16px;
       }
 
-      .frf_notice_content {
+      .frf_banner_content {
         display: flex;
         align-items: center;
-        justify-content: center;
-        gap: 10px;
+        gap: 12px;
       }
 
-      .frf_notice_text {
+      .frf_banner_icon {
+        font-size: 24px;
+        flex-shrink: 0;
+      }
+
+      .frf_banner_text {
+        flex: 1;
+      }
+
+      .frf_banner_title {
         font-size: 14px;
+        font-weight: bold;
+        color: #67c1f5;
+        margin-bottom: 4px;
+      }
+
+      .frf_banner_desc {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .frf_banner_item {
+        font-size: 12px;
+        color: #acb2b8;
+      }
+
+      .frf_banner_item strong {
+        color: #67c1f5;
+      }
+
+      .frf_banner_close {
+        background: transparent;
+        border: none;
         color: #8f98a0;
+        font-size: 16px;
+        cursor: pointer;
+        padding: 4px 8px;
+        border-radius: 2px;
+        transition: all 0.2s;
+      }
+
+      .frf_banner_close:hover {
+        background: rgba(255, 255, 255, 0.1);
+        color: #fff;
       }
 
       /* FRF 加载状态 */
@@ -2765,10 +2835,10 @@ class PageDetector {
 
   /**
    * 检测并自动触发FRF
-   * @param {Function} callback - 需要FRF介入时的回调函数
-   * @param {Function} onDetecting - 开始检测时的回调（用于显示"检测中"提示）
+   * @param {Function} onNeedFix - 需要FRF修复时的回调
+   * @param {Function} onPageReady - 页面准备好时的回调（用于显示欢迎横幅和按钮）
    */
-  async detectAndTrigger(callback, onDetecting) {
+  async detectAndTrigger(onNeedFix, onPageReady) {
     if (this.isTriggered) {
       this.logger.debug('已经触发过，跳过');
       return;
@@ -2788,63 +2858,37 @@ class PageDetector {
 
     this.logger.info(`检测到好友评测页面，App ID: ${appId}`);
 
-    // 立即通知开始检测
-    if (onDetecting && typeof onDetecting === 'function') {
-      onDetecting(appId);
+    // 立即显示欢迎横幅和FRF按钮（不等待检测结果）
+    if (onPageReady && typeof onPageReady === 'function') {
+      onPageReady(appId);
     }
 
-    // 检查Steam原生渲染是否成功
+    // 后台检查Steam原生渲染是否成功
     const steamSuccess = await this.checkSteamRenderSuccess();
 
     if (steamSuccess) {
-      this.logger.info('Steam 原生渲染成功，FRF 不介入');
-      // 隐藏修复提示（如果显示了的话）
-      this.hideFixingNotice();
-      // 仍然添加刷新按钮，以便用户手动刷新
-      this.addManualTriggerHint();
+      this.logger.info('Steam 原生渲染成功，FRF 待命');
+      // Steam正常工作，横幅和按钮保留，用户可手动使用FRF
       return;
     }
 
-    // Steam渲染失败，触发FRF
+    // Steam渲染失败，自动触发FRF修复
     this.logger.info('Steam 渲染失败，FRF 自动介入');
     this.isTriggered = true;
 
-    if (callback && typeof callback === 'function') {
-      callback(appId);
+    if (onNeedFix && typeof onNeedFix === 'function') {
+      onNeedFix(appId);
     }
   }
 
   /**
-   * 隐藏修复提示
+   * 隐藏欢迎横幅
    */
-  hideFixingNotice() {
-    const notice = document.querySelector('.frf_fixing_notice');
-    if (notice) {
-      notice.remove();
+  hideWelcomeBanner() {
+    const banner = document.querySelector('.frf_welcome_banner');
+    if (banner) {
+      banner.remove();
     }
-  }
-
-  /**
-   * 添加手动触发提示
-   */
-  addManualTriggerHint() {
-    // 如果Steam正常工作，可以添加一个小提示让用户知道FRF可用
-    const filterArea = document.querySelector('.apphub_SectionFilter');
-    if (!filterArea) return;
-
-    // 检查是否已存在
-    if (document.querySelector('.frf_hint')) return;
-
-    const hint = document.createElement('div');
-    hint.className = 'frf_hint';
-    hint.style.cssText = 'display: inline-block; margin-left: 10px; font-size: 12px; color: #8f98a0;';
-    hint.innerHTML = `
-      <span style="cursor: pointer;" onclick="window.FRF && window.FRF.renderUI(true)">
-        [FRF 可用]
-      </span>
-    `;
-
-    filterArea.appendChild(hint);
   }
 
   /**
@@ -3416,8 +3460,8 @@ if (typeof window !== 'undefined') {
         this._uiRenderer = new UIRenderer();
       }
 
-      // 先隐藏修复提示（如果有的话）
-      this._uiRenderer.hideFixingNotice();
+      // 隐藏欢迎横幅（开始渲染后不需要了）
+      this._uiRenderer.hideWelcomeBanner();
 
       if (!this._uiRenderer.init()) {
         console.error('❌ UI渲染器初始化失败，可能不在正确的页面');
@@ -3698,7 +3742,7 @@ if (typeof window !== 'undefined') {
         this._pageDetector = new PageDetector();
       }
 
-      // 初始化UI渲染器（用于显示修复提示）
+      // 初始化UI渲染器
       if (!this._uiRenderer) {
         this._uiRenderer = new UIRenderer();
       }
@@ -3709,26 +3753,30 @@ if (typeof window !== 'undefined') {
 
       // 立即检测当前页面
       this._pageDetector.detectAndTrigger(
-        // onNeedFix: Steam渲染失败，需要FRF修复
+        // onNeedFix: Steam渲染失败，需要FRF自动修复
         (appId) => {
           console.log(`🔧 检测到Steam渲染bug，自动启动FRF修复...`);
-          // 开始渲染（会自动隐藏修复提示）
+          // 隐藏欢迎横幅（开始渲染后不需要了）
+          self._uiRenderer.hideWelcomeBanner();
+          // 开始渲染
           self.renderUI();
         },
-        // onDetecting: 开始检测时立即显示提示
+        // onPageReady: 进入好友评测页面立即显示欢迎横幅和按钮
         (appId) => {
-          console.log(`🔍 检测好友评测页面渲染状态...`);
-          self._uiRenderer.showFixingNotice();
+          console.log(`🚀 FRF 已就绪，App ID: ${appId}`);
+          // 立即显示欢迎横幅
+          self._uiRenderer.showWelcomeBanner();
+          // 立即添加FRF刷新按钮
+          self._uiRenderer.addRefreshButton();
         }
       );
 
       // 监听页面变化（SPA导航）
       this._pageDetector.watchPageChanges((appId) => {
         console.log(`🔧 页面变化，重新检测...`);
-        // 立即显示修复提示
-        self._uiRenderer.showFixingNotice();
-        // 开始渲染
-        self.renderUI();
+        // 显示欢迎横幅和按钮
+        self._uiRenderer.showWelcomeBanner();
+        self._uiRenderer.addRefreshButton();
       });
 
       console.log('👀 FRF 自动检测已启动');
