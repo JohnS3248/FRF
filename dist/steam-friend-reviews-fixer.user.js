@@ -2143,19 +2143,32 @@ class UIRenderer {
     const maxContentLength = 300;
     let displayContent = this.safeHTMLTruncate(review.reviewContent || '', maxContentLength);
 
-    // 格式化有价值人数
-    const helpfulText = review.helpfulCount > 0
-      ? `有 ${review.helpfulCount} 人觉得这篇评测有价值`
-      : '尚未有人觉得这篇评测有价值';
+    // 格式化有价值/欢乐人数（如果都为0则不显示）
+    let helpfulText = '';
+    if (review.helpfulCount > 0 && review.funnyCount > 0) {
+      helpfulText = `有 ${review.helpfulCount} 人觉得这篇评测有价值，有 ${review.funnyCount} 人觉得这篇评测很欢乐`;
+    } else if (review.helpfulCount > 0) {
+      helpfulText = `有 ${review.helpfulCount} 人觉得这篇评测有价值`;
+    } else if (review.funnyCount > 0) {
+      helpfulText = `有 ${review.funnyCount} 人觉得这篇评测很欢乐`;
+    }
+    // 如果都为0，helpfulText保持空字符串，不显示该行
 
     // 用户头像（使用默认头像作为后备）
     const avatarUrl = review.userAvatar ||
       'https://avatars.fastly.steamstatic.com/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_medium.jpg';
 
+    // 格式化日期显示（发布于 + 更新于）
+    let dateText = `发布于：${review.publishDate}`;
+    if (review.updateDate) {
+      dateText += `<br>更新于：${review.updateDate}`;
+    }
+
     // 完全自定义HTML结构，使用frf_前缀避免Steam CSS干扰
     return `
       <div class="frf_card_inner">
-        <!-- 顶部：有价值人数 -->
+        <!-- 顶部：有价值人数（如果有的话） -->
+        ${helpfulText ? `
         <div class="frf_helpful_row">
           <span class="frf_helpful_text">${helpfulText}</span>
           <span class="frf_award">
@@ -2163,6 +2176,7 @@ class UIRenderer {
             <span>0</span>
           </span>
         </div>
+        ` : ''}
 
         <!-- 推荐区域 -->
         <div class="frf_recommend_row">
@@ -2173,8 +2187,8 @@ class UIRenderer {
           </div>
         </div>
 
-        <!-- 发布日期 -->
-        <div class="frf_date_row">发布于：${review.publishDate}</div>
+        <!-- 发布/更新日期 -->
+        <div class="frf_date_row">${dateText}</div>
 
         <!-- 评测内容 -->
         <div class="frf_content_row">${displayContent}</div>
