@@ -2,7 +2,7 @@
 // @name         Steam 好友评测修复工具
 // @name:en      Steam Friend Reviews Fixer
 // @namespace    https://github.com/JohnS3248/FRF
-// @version      4.1.0
+// @version      5.0.0
 // @description  自动修复 Steam 好友评测页面渲染 Bug，显示完整的好友评测列表
 // @description:en Auto-fix Steam friend reviews rendering bug, display complete friend review list
 // @author       JohnS3248
@@ -31,8 +31,8 @@
 
 const Constants = {
   // ==================== 版本信息 ====================
-  VERSION: '4.1.0',
-  CACHE_VERSION: 'v2', // 新架构缓存版本
+  VERSION: '5.0.0',
+  CACHE_VERSION: 'v2', // 渐进式缓存版本
 
   // ==================== 请求配置 ====================
   BATCH_SIZE: 5,                    // 并发批处理大小
@@ -1113,127 +1113,6 @@ class ReviewCache {
   }
 
   /**
-   * 暂停构建
-   */
-  pauseBuild() {
-    if (this.isBuilding && !this.isPaused) {
-      this.isPaused = true;
-      this.logger.info('⏸️ 正在暂停...');
-    }
-  }
-
-  /**
-   * 继续构建
-   */
-  async resumeBuild() {
-    // 尝试从保存的进度恢复
-    const savedProgress = this.loadBuildProgress();
-    if (savedProgress) {
-      this.friendIds = savedProgress.friendIds;
-      this.currentIndex = savedProgress.currentIndex;
-      this.friendReviewsMap = savedProgress.data;
-      this.startTime = Date.now() - (savedProgress.elapsed || 0);
-    }
-
-    if (this.currentIndex < this.friendIds.length) {
-      this.isPaused = false;
-      this.isBuilding = true;
-      this.logger.info(`▶️ 继续构建 (${this.currentIndex}/${this.friendIds.length})...`);
-
-      await this.processFriends();
-    } else {
-      this.logger.info('❌ 没有可继续的构建任务');
-    }
-  }
-
-  /**
-   * 保存构建进度
-   */
-  saveBuildProgress() {
-    try {
-      const progress = {
-        friendIds: this.friendIds,
-        currentIndex: this.currentIndex,
-        data: this.friendReviewsMap,
-        elapsed: Date.now() - this.startTime,
-        timestamp: Date.now()
-      };
-      localStorage.setItem(this.progressKey, JSON.stringify(progress));
-      this.logger.debug('进度已保存');
-    } catch (error) {
-      this.logger.warn('保存进度失败', error);
-    }
-  }
-
-  /**
-   * 加载构建进度
-   */
-  loadBuildProgress() {
-    try {
-      const saved = localStorage.getItem(this.progressKey);
-      if (saved) {
-        return JSON.parse(saved);
-      }
-    } catch (error) {
-      this.logger.warn('加载进度失败', error);
-    }
-    return null;
-  }
-
-  /**
-   * 清除构建进度
-   */
-  clearBuildProgress() {
-    localStorage.removeItem(this.progressKey);
-  }
-
-  /**
-   * 获取构建状态
-   */
-  getBuildStatus() {
-    return {
-      isBuilding: this.isBuilding,
-      isPaused: this.isPaused,
-      currentIndex: this.currentIndex,
-      totalFriends: this.friendIds.length,
-      collectedFriends: Object.keys(this.friendReviewsMap).length,
-      progress: this.friendIds.length > 0
-        ? ((this.currentIndex / this.friendIds.length) * 100).toFixed(1)
-        : 0
-    };
-  }
-
-  /**
-   * 格式化时间
-   */
-  formatTime(ms) {
-    if (ms < 1000) return '< 1 秒';
-    const seconds = Math.floor(ms / 1000);
-    if (seconds < 60) return `${seconds} 秒`;
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = seconds % 60;
-    return `${minutes} 分 ${remainingSeconds} 秒`;
-  }
-
-  /**
-   * 处理单个好友
-   */
-  async processFriend(steamId) {
-    try {
-      const appIds = await this.extractor.extractFriendReviewGames(steamId);
-
-      // 只缓存有评测的好友
-      if (appIds.length > 0) {
-        this.friendReviewsMap[steamId] = appIds;
-      }
-
-    } catch (error) {
-      this.logger.warn(`处理好友 ${steamId} 失败`, error);
-      // 不中断整体流程
-    }
-  }
-
-  /**
    * 查找哪些好友评测了指定游戏
    * @param {string} appId - 游戏 App ID
    * @returns {Array<string>} Steam ID 数组
@@ -1245,33 +1124,6 @@ class ReviewCache {
 
     this.logger.info(`游戏 ${appId} 匹配到 ${matchedFriends.length} 个好友`);
     return matchedFriends;
-  }
-
-  /**
-   * 检查缓存是否存在且有效
-   * @returns {boolean}
-   */
-  hasCacheValidCache() {
-    const cached = localStorage.getItem(this.cacheKey);
-    if (!cached) {
-      return false;
-    }
-
-    try {
-      const { timestamp } = JSON.parse(cached);
-      const age = Date.now() - timestamp;
-
-      // 检查是否过期
-      if (age < Constants.CACHE_DURATION) {
-        return true;
-      } else {
-        this.logger.info('缓存已过期');
-        return false;
-      }
-    } catch (error) {
-      this.logger.warn('缓存解析失败', error);
-      return false;
-    }
   }
 
   /**
@@ -1350,6 +1202,24 @@ class ReviewCache {
     }
     if (!this.friendReviewsMap[steamId].includes(appId)) {
       this.friendReviewsMap[steamId].push(appId);
+    }
+  }
+
+  /**
+   * 从缓存中移除指定游戏的评测记录（用于后台更新发现删除的评测）
+   * @param {string} steamId - 好友 Steam ID
+   * @param {string} appId - 游戏 App ID
+   */
+  removeReviewFromCache(steamId, appId) {
+    if (this.friendReviewsMap[steamId]) {
+      const index = this.friendReviewsMap[steamId].indexOf(appId);
+      if (index !== -1) {
+        this.friendReviewsMap[steamId].splice(index, 1);
+        // 如果该好友没有评测记录了，删除整个条目
+        if (this.friendReviewsMap[steamId].length === 0) {
+          delete this.friendReviewsMap[steamId];
+        }
+      }
     }
   }
 
@@ -2239,6 +2109,62 @@ class UIRenderer {
   }
 
   /**
+   * 显示数据更新提示（后台更新发现数据改动时显示）
+   * @param {string} message - 提示消息
+   */
+  showUpdateNotice(message) {
+    // 先移除已有的提示
+    this.hideUpdateNotice();
+
+    const notice = document.createElement('div');
+    notice.className = 'frf_update_notice';
+    notice.innerHTML = `
+      <div class="frf_update_content">
+        <span class="frf_update_icon">🔔</span>
+        <span class="frf_update_text">${message}</span>
+        <button class="frf_update_btn" title="点击刷新获取最新数据">刷新</button>
+        <button class="frf_update_close" title="忽略">✕</button>
+      </div>
+    `;
+
+    // 刷新按钮事件
+    notice.querySelector('.frf_update_btn').addEventListener('click', () => {
+      this.hideUpdateNotice();
+      if (window.FRF && window.FRF.renderUI) {
+        window.FRF.renderUI(true); // 强制刷新
+      }
+    });
+
+    // 关闭按钮事件
+    notice.querySelector('.frf_update_close').addEventListener('click', () => {
+      this.hideUpdateNotice();
+    });
+
+    // 插入到页面顶部（容器之前）
+    if (this.container && this.container.parentNode) {
+      this.container.parentNode.insertBefore(notice, this.container);
+    } else {
+      // 备选：插入到筛选栏后面
+      const filterArea = document.querySelector('.apphub_SectionFilter');
+      if (filterArea && filterArea.parentNode) {
+        filterArea.parentNode.insertBefore(notice, filterArea.nextSibling);
+      }
+    }
+
+    this.logger.info('显示更新提示:', message);
+  }
+
+  /**
+   * 隐藏数据更新提示
+   */
+  hideUpdateNotice() {
+    const notice = document.querySelector('.frf_update_notice');
+    if (notice) {
+      notice.remove();
+    }
+  }
+
+  /**
    * 更新加载进度
    * @param {number} checked - 已检查好友数
    * @param {number} total - 总好友数
@@ -2660,6 +2586,63 @@ class UIRenderer {
       }
 
       .frf_banner_close:hover {
+        background: rgba(255, 255, 255, 0.1);
+        color: #fff;
+      }
+
+      /* FRF 更新提示 */
+      .frf_update_notice {
+        background: linear-gradient(135deg, rgba(255, 152, 0, 0.2) 0%, rgba(255, 193, 7, 0.15) 100%);
+        border: 1px solid rgba(255, 152, 0, 0.4);
+        border-radius: 4px;
+        margin: 10px 0 15px 0;
+        padding: 10px 16px;
+      }
+
+      .frf_update_content {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .frf_update_icon {
+        font-size: 18px;
+        flex-shrink: 0;
+      }
+
+      .frf_update_text {
+        flex: 1;
+        font-size: 13px;
+        color: #ffc107;
+      }
+
+      .frf_update_btn {
+        background: #ff9800;
+        border: none;
+        color: #fff;
+        font-size: 12px;
+        padding: 6px 14px;
+        border-radius: 2px;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+
+      .frf_update_btn:hover {
+        background: #f57c00;
+      }
+
+      .frf_update_close {
+        background: transparent;
+        border: none;
+        color: #8f98a0;
+        font-size: 14px;
+        cursor: pointer;
+        padding: 4px 8px;
+        border-radius: 2px;
+        transition: all 0.2s;
+      }
+
+      .frf_update_close:hover {
         background: rgba(255, 255, 255, 0.1);
         color: #fff;
       }
@@ -3175,20 +3158,873 @@ if (typeof window !== 'undefined') {
 }
 
 
+// ==================== src/ui/SettingsPanel.js ====================
+
+/**
+ * 设置面板 UI 组件
+ * 提供用户可视化配置界面
+ */
+
+class SettingsPanel {
+  constructor() {
+    this.logger = new Logger('SettingsPanel');
+    this.isOpen = false;
+    this.panelElement = null;
+    this.overlayElement = null;
+  }
+
+  /**
+   * 初始化设置面板
+   */
+  init() {
+    this.injectStyles();
+    this.createPanel();
+    this.createSettingsButton();
+  }
+
+  /**
+   * 创建设置按钮（添加到 FRF 刷新按钮旁边）
+   */
+  createSettingsButton() {
+    // 检查是否已存在
+    if (document.querySelector('.frf_settings_btn')) return;
+
+    const btn = document.createElement('div');
+    btn.className = 'frf_settings_btn';
+    btn.innerHTML = `
+      <a class="btnv6_blue_hoverfade btn_small_thin">
+        <span>FRF 设置</span>
+      </a>
+    `;
+
+    btn.addEventListener('click', () => {
+      this.toggle();
+    });
+
+    // 找到 FRF 刷新按钮，插入到后面
+    const refreshBtn = document.querySelector('.frf_refresh_btn');
+    if (refreshBtn && refreshBtn.parentNode) {
+      refreshBtn.parentNode.insertBefore(btn, refreshBtn.nextSibling);
+      return;
+    }
+
+    // 备选：找到筛选区域
+    const filterArea = document.querySelector('.apphub_SectionFilter');
+    if (filterArea) {
+      filterArea.appendChild(btn);
+    }
+  }
+
+  /**
+   * 创建设置面板 DOM
+   */
+  createPanel() {
+    // 遮罩层
+    this.overlayElement = document.createElement('div');
+    this.overlayElement.className = 'frf_settings_overlay';
+    this.overlayElement.addEventListener('click', () => this.close());
+
+    // 面板
+    this.panelElement = document.createElement('div');
+    this.panelElement.className = 'frf_settings_panel';
+    this.panelElement.innerHTML = this.buildPanelHTML();
+
+    // 添加到页面
+    document.body.appendChild(this.overlayElement);
+    document.body.appendChild(this.panelElement);
+
+    // 绑定事件
+    this.bindEvents();
+  }
+
+  /**
+   * 构建面板 HTML
+   */
+  buildPanelHTML() {
+    return `
+      <div class="frf_settings_header">
+        <h2>FRF 设置</h2>
+        <button class="frf_settings_close" title="关闭">✕</button>
+      </div>
+
+      <div class="frf_settings_content">
+        <!-- 缓存管理 -->
+        <div class="frf_settings_section">
+          <h3>缓存管理</h3>
+          <div class="frf_settings_info" id="frf_cache_info">
+            <div class="frf_info_loading">正在加载缓存信息...</div>
+          </div>
+          <div class="frf_settings_actions">
+            <button class="frf_btn frf_btn_danger" id="frf_clear_cache">清除缓存</button>
+            <button class="frf_btn frf_btn_secondary" id="frf_refresh_stats">刷新统计</button>
+          </div>
+        </div>
+
+        <!-- 快速模式配置 -->
+        <div class="frf_settings_section">
+          <h3>快速模式配置</h3>
+          <div class="frf_settings_row">
+            <label for="frf_batch_size">批次大小</label>
+            <div class="frf_input_group">
+              <input type="number" id="frf_batch_size" min="1" max="50" value="30">
+              <span class="frf_input_hint">并发请求数（推荐 30）</span>
+            </div>
+          </div>
+          <div class="frf_settings_row">
+            <label for="frf_delay">批次延迟</label>
+            <div class="frf_input_group">
+              <input type="number" id="frf_delay" min="0" max="5000" value="0">
+              <span class="frf_input_hint">毫秒（推荐 0）</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 调试选项 -->
+        <div class="frf_settings_section">
+          <h3>调试选项</h3>
+          <div class="frf_settings_row">
+            <label for="frf_debug_mode">调试模式</label>
+            <div class="frf_toggle_group">
+              <label class="frf_toggle">
+                <input type="checkbox" id="frf_debug_mode">
+                <span class="frf_toggle_slider"></span>
+              </label>
+              <span class="frf_input_hint">显示详细日志</span>
+            </div>
+          </div>
+          <div class="frf_settings_row">
+            <label for="frf_quick_debug">快速模式调试</label>
+            <div class="frf_toggle_group">
+              <label class="frf_toggle">
+                <input type="checkbox" id="frf_quick_debug">
+                <span class="frf_toggle_slider"></span>
+              </label>
+              <span class="frf_input_hint">显示每个请求的响应时间</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 关于 -->
+        <div class="frf_settings_section">
+          <h3>关于</h3>
+          <div class="frf_about_info">
+            <p><strong>FRF - Friend Review Finder</strong></p>
+            <p>版本：<span id="frf_version">${Constants.VERSION}</span></p>
+            <p>
+              <a href="https://github.com/JohnS3248/FRF" target="_blank">GitHub</a> ·
+              <a href="https://github.com/JohnS3248/FRF/issues" target="_blank">反馈问题</a>
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="frf_settings_footer">
+        <button class="frf_btn frf_btn_primary" id="frf_save_settings">保存设置</button>
+        <button class="frf_btn frf_btn_secondary" id="frf_reset_settings">恢复默认</button>
+      </div>
+    `;
+  }
+
+  /**
+   * 绑定事件处理
+   */
+  bindEvents() {
+    // 关闭按钮
+    this.panelElement.querySelector('.frf_settings_close').addEventListener('click', () => {
+      this.close();
+    });
+
+    // 清除缓存
+    this.panelElement.querySelector('#frf_clear_cache').addEventListener('click', () => {
+      this.clearCache();
+    });
+
+    // 刷新统计
+    this.panelElement.querySelector('#frf_refresh_stats').addEventListener('click', () => {
+      this.loadCacheStats();
+    });
+
+    // 保存设置
+    this.panelElement.querySelector('#frf_save_settings').addEventListener('click', () => {
+      this.saveSettings();
+    });
+
+    // 恢复默认
+    this.panelElement.querySelector('#frf_reset_settings').addEventListener('click', () => {
+      this.resetSettings();
+    });
+
+    // ESC 关闭
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && this.isOpen) {
+        this.close();
+      }
+    });
+  }
+
+  /**
+   * 加载缓存统计信息
+   */
+  loadCacheStats() {
+    const infoContainer = this.panelElement.querySelector('#frf_cache_info');
+
+    try {
+      const cache = new ReviewCache();
+      const hasCache = cache.loadFromCache();
+
+      if (hasCache) {
+        const stats = cache.getCacheStats();
+        infoContainer.innerHTML = `
+          <div class="frf_stats_grid">
+            <div class="frf_stat_item">
+              <span class="frf_stat_value">${stats.friendsWithReviews}</span>
+              <span class="frf_stat_label">缓存好友数</span>
+            </div>
+            <div class="frf_stat_item">
+              <span class="frf_stat_value">${stats.totalReviews}</span>
+              <span class="frf_stat_label">总评测记录</span>
+            </div>
+            <div class="frf_stat_item">
+              <span class="frf_stat_value">${stats.cacheAge || '-'}</span>
+              <span class="frf_stat_label">缓存时间 (小时)</span>
+            </div>
+          </div>
+        `;
+      } else {
+        infoContainer.innerHTML = `
+          <div class="frf_no_cache">
+            <p>暂无缓存数据</p>
+            <p class="frf_hint">首次使用 FRF 刷新后会自动创建缓存</p>
+          </div>
+        `;
+      }
+    } catch (error) {
+      infoContainer.innerHTML = `
+        <div class="frf_error_msg">加载缓存信息失败: ${error.message}</div>
+      `;
+    }
+  }
+
+  /**
+   * 加载当前设置到表单
+   */
+  loadSettings() {
+    // 从 FRF 对象读取当前配置
+    if (window.FRF && window.FRF._quickConfig) {
+      const config = window.FRF._quickConfig;
+      this.panelElement.querySelector('#frf_batch_size').value = config.batchSize || 30;
+      this.panelElement.querySelector('#frf_delay').value = config.delay || 0;
+      this.panelElement.querySelector('#frf_quick_debug').checked = config.debug || false;
+    }
+
+    // 调试模式
+    this.panelElement.querySelector('#frf_debug_mode').checked = Constants.DEBUG_MODE || false;
+
+    // 加载缓存统计
+    this.loadCacheStats();
+  }
+
+  /**
+   * 保存设置
+   */
+  saveSettings() {
+    const batchSize = parseInt(this.panelElement.querySelector('#frf_batch_size').value, 10);
+    const delay = parseInt(this.panelElement.querySelector('#frf_delay').value, 10);
+    const debugMode = this.panelElement.querySelector('#frf_debug_mode').checked;
+    const quickDebug = this.panelElement.querySelector('#frf_quick_debug').checked;
+
+    // 验证
+    if (batchSize < 1 || batchSize > 50) {
+      this.showToast('批次大小必须在 1-50 之间', 'error');
+      return;
+    }
+
+    if (delay < 0 || delay > 5000) {
+      this.showToast('批次延迟必须在 0-5000 之间', 'error');
+      return;
+    }
+
+    // 应用设置
+    if (window.FRF) {
+      window.FRF.setQuickConfig({
+        batchSize,
+        delay,
+        debug: quickDebug
+      });
+      window.FRF.setDebug(debugMode);
+    }
+
+    // 保存到 localStorage
+    this.saveToStorage({
+      batchSize,
+      delay,
+      debugMode,
+      quickDebug
+    });
+
+    this.showToast('设置已保存', 'success');
+    this.logger.info('设置已保存', { batchSize, delay, debugMode, quickDebug });
+  }
+
+  /**
+   * 恢复默认设置
+   */
+  resetSettings() {
+    // 默认值
+    this.panelElement.querySelector('#frf_batch_size').value = 30;
+    this.panelElement.querySelector('#frf_delay').value = 0;
+    this.panelElement.querySelector('#frf_debug_mode').checked = false;
+    this.panelElement.querySelector('#frf_quick_debug').checked = false;
+
+    this.showToast('已恢复默认设置，点击保存生效', 'info');
+  }
+
+  /**
+   * 清除缓存
+   */
+  clearCache() {
+    if (confirm('确定要清除所有缓存数据吗？\n\n清除后下次访问游戏页面需要重新搜索。')) {
+      try {
+        const cache = new ReviewCache();
+        cache.clearCache();
+        this.loadCacheStats();
+        this.showToast('缓存已清除', 'success');
+      } catch (error) {
+        this.showToast('清除缓存失败: ' + error.message, 'error');
+      }
+    }
+  }
+
+  /**
+   * 保存设置到 localStorage
+   */
+  saveToStorage(settings) {
+    try {
+      localStorage.setItem('frf_settings', JSON.stringify(settings));
+    } catch (error) {
+      this.logger.warn('保存设置失败', error);
+    }
+  }
+
+  /**
+   * 从 localStorage 加载设置
+   */
+  loadFromStorage() {
+    try {
+      const saved = localStorage.getItem('frf_settings');
+      return saved ? JSON.parse(saved) : null;
+    } catch (error) {
+      this.logger.warn('加载设置失败', error);
+      return null;
+    }
+  }
+
+  /**
+   * 应用保存的设置（启动时调用）
+   */
+  applySavedSettings() {
+    const settings = this.loadFromStorage();
+    if (settings && window.FRF) {
+      window.FRF.setQuickConfig({
+        batchSize: settings.batchSize || 30,
+        delay: settings.delay || 0,
+        debug: settings.quickDebug || false
+      });
+
+      if (settings.debugMode) {
+        Constants.DEBUG_MODE = true;
+      }
+
+      this.logger.info('已应用保存的设置', settings);
+    }
+  }
+
+  /**
+   * 显示 Toast 提示
+   */
+  showToast(message, type = 'info') {
+    // 移除已有的 toast
+    const existingToast = document.querySelector('.frf_toast');
+    if (existingToast) {
+      existingToast.remove();
+    }
+
+    const toast = document.createElement('div');
+    toast.className = `frf_toast frf_toast_${type}`;
+    toast.textContent = message;
+
+    document.body.appendChild(toast);
+
+    // 动画显示
+    setTimeout(() => toast.classList.add('frf_toast_show'), 10);
+
+    // 3秒后隐藏
+    setTimeout(() => {
+      toast.classList.remove('frf_toast_show');
+      setTimeout(() => toast.remove(), 300);
+    }, 3000);
+  }
+
+  /**
+   * 打开设置面板
+   */
+  open() {
+    this.loadSettings();
+    this.overlayElement.classList.add('frf_show');
+    this.panelElement.classList.add('frf_show');
+    this.isOpen = true;
+    document.body.style.overflow = 'hidden';
+  }
+
+  /**
+   * 关闭设置面板
+   */
+  close() {
+    this.overlayElement.classList.remove('frf_show');
+    this.panelElement.classList.remove('frf_show');
+    this.isOpen = false;
+    document.body.style.overflow = '';
+  }
+
+  /**
+   * 切换设置面板
+   */
+  toggle() {
+    if (this.isOpen) {
+      this.close();
+    } else {
+      this.open();
+    }
+  }
+
+  /**
+   * 注入样式
+   */
+  injectStyles() {
+    if (document.querySelector('#frf_settings_styles')) return;
+
+    const style = document.createElement('style');
+    style.id = 'frf_settings_styles';
+    style.textContent = `
+      /* 设置按钮 */
+      .frf_settings_btn {
+        display: inline-block;
+        margin-left: 10px;
+        cursor: pointer;
+      }
+
+      /* 遮罩层 */
+      .frf_settings_overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.7);
+        z-index: 9998;
+        opacity: 0;
+        visibility: hidden;
+        transition: all 0.3s ease;
+      }
+
+      .frf_settings_overlay.frf_show {
+        opacity: 1;
+        visibility: visible;
+      }
+
+      /* 设置面板 */
+      .frf_settings_panel {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%) scale(0.9);
+        width: 500px;
+        max-width: 90vw;
+        max-height: 85vh;
+        background: linear-gradient(180deg, #2a475e 0%, #1b2838 100%);
+        border: 1px solid #4a6278;
+        border-radius: 6px;
+        z-index: 9999;
+        opacity: 0;
+        visibility: hidden;
+        transition: all 0.3s ease;
+        display: flex;
+        flex-direction: column;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+      }
+
+      .frf_settings_panel.frf_show {
+        opacity: 1;
+        visibility: visible;
+        transform: translate(-50%, -50%) scale(1);
+      }
+
+      /* 面板头部 */
+      .frf_settings_header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 16px 20px;
+        border-bottom: 1px solid #4a6278;
+        background: rgba(0, 0, 0, 0.2);
+      }
+
+      .frf_settings_header h2 {
+        margin: 0;
+        font-size: 18px;
+        font-weight: normal;
+        color: #fff;
+      }
+
+      .frf_settings_close {
+        background: transparent;
+        border: none;
+        color: #8f98a0;
+        font-size: 20px;
+        cursor: pointer;
+        padding: 4px 8px;
+        border-radius: 4px;
+        transition: all 0.2s;
+      }
+
+      .frf_settings_close:hover {
+        background: rgba(255, 255, 255, 0.1);
+        color: #fff;
+      }
+
+      /* 面板内容 */
+      .frf_settings_content {
+        flex: 1;
+        overflow-y: auto;
+        padding: 20px;
+      }
+
+      /* 设置区块 */
+      .frf_settings_section {
+        margin-bottom: 24px;
+      }
+
+      .frf_settings_section:last-child {
+        margin-bottom: 0;
+      }
+
+      .frf_settings_section h3 {
+        margin: 0 0 12px 0;
+        font-size: 14px;
+        font-weight: bold;
+        color: #67c1f5;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+
+      /* 设置行 */
+      .frf_settings_row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      }
+
+      .frf_settings_row:last-child {
+        border-bottom: none;
+      }
+
+      .frf_settings_row > label {
+        color: #c6d4df;
+        font-size: 13px;
+      }
+
+      /* 输入组 */
+      .frf_input_group {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .frf_input_group input[type="number"] {
+        width: 80px;
+        padding: 6px 10px;
+        background: rgba(0, 0, 0, 0.3);
+        border: 1px solid #4a6278;
+        border-radius: 3px;
+        color: #fff;
+        font-size: 13px;
+        text-align: center;
+      }
+
+      .frf_input_group input[type="number"]:focus {
+        outline: none;
+        border-color: #67c1f5;
+      }
+
+      .frf_input_hint {
+        font-size: 11px;
+        color: #8f98a0;
+      }
+
+      /* 开关组 */
+      .frf_toggle_group {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      /* 开关样式 */
+      .frf_toggle {
+        position: relative;
+        display: inline-block;
+        width: 44px;
+        height: 24px;
+      }
+
+      .frf_toggle input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+
+      .frf_toggle_slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.3);
+        border: 1px solid #4a6278;
+        border-radius: 24px;
+        transition: all 0.3s;
+      }
+
+      .frf_toggle_slider:before {
+        position: absolute;
+        content: "";
+        height: 18px;
+        width: 18px;
+        left: 2px;
+        bottom: 2px;
+        background: #8f98a0;
+        border-radius: 50%;
+        transition: all 0.3s;
+      }
+
+      .frf_toggle input:checked + .frf_toggle_slider {
+        background: #5ba32b;
+        border-color: #5ba32b;
+      }
+
+      .frf_toggle input:checked + .frf_toggle_slider:before {
+        transform: translateX(20px);
+        background: #fff;
+      }
+
+      /* 统计信息 */
+      .frf_settings_info {
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 4px;
+        padding: 16px;
+        margin-bottom: 12px;
+      }
+
+      .frf_stats_grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+        text-align: center;
+      }
+
+      .frf_stat_item {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .frf_stat_value {
+        font-size: 24px;
+        font-weight: bold;
+        color: #67c1f5;
+      }
+
+      .frf_stat_label {
+        font-size: 11px;
+        color: #8f98a0;
+      }
+
+      .frf_no_cache {
+        text-align: center;
+        color: #8f98a0;
+      }
+
+      .frf_no_cache .frf_hint {
+        font-size: 12px;
+        margin-top: 4px;
+      }
+
+      .frf_info_loading {
+        text-align: center;
+        color: #8f98a0;
+      }
+
+      .frf_error_msg {
+        color: #c75050;
+        text-align: center;
+      }
+
+      /* 操作按钮组 */
+      .frf_settings_actions {
+        display: flex;
+        gap: 10px;
+      }
+
+      /* 按钮样式 */
+      .frf_btn {
+        padding: 8px 16px;
+        border: none;
+        border-radius: 3px;
+        font-size: 13px;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+
+      .frf_btn_primary {
+        background: linear-gradient(90deg, #47bfff 0%, #1a9fff 100%);
+        color: #fff;
+      }
+
+      .frf_btn_primary:hover {
+        background: linear-gradient(90deg, #66ccff 0%, #47bfff 100%);
+      }
+
+      .frf_btn_secondary {
+        background: rgba(103, 193, 245, 0.2);
+        color: #67c1f5;
+        border: 1px solid #67c1f5;
+      }
+
+      .frf_btn_secondary:hover {
+        background: rgba(103, 193, 245, 0.3);
+      }
+
+      .frf_btn_danger {
+        background: rgba(199, 80, 80, 0.2);
+        color: #c75050;
+        border: 1px solid #c75050;
+      }
+
+      .frf_btn_danger:hover {
+        background: rgba(199, 80, 80, 0.3);
+      }
+
+      /* 面板底部 */
+      .frf_settings_footer {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        padding: 16px 20px;
+        border-top: 1px solid #4a6278;
+        background: rgba(0, 0, 0, 0.2);
+      }
+
+      /* 关于信息 */
+      .frf_about_info {
+        color: #8f98a0;
+        font-size: 13px;
+        line-height: 1.6;
+      }
+
+      .frf_about_info p {
+        margin: 4px 0;
+      }
+
+      .frf_about_info a {
+        color: #67c1f5;
+        text-decoration: none;
+      }
+
+      .frf_about_info a:hover {
+        text-decoration: underline;
+      }
+
+      /* Toast 提示 */
+      .frf_toast {
+        position: fixed;
+        bottom: 30px;
+        left: 50%;
+        transform: translateX(-50%) translateY(20px);
+        padding: 12px 24px;
+        border-radius: 4px;
+        font-size: 14px;
+        z-index: 10000;
+        opacity: 0;
+        transition: all 0.3s ease;
+        pointer-events: none;
+      }
+
+      .frf_toast_show {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+
+      .frf_toast_success {
+        background: #5ba32b;
+        color: #fff;
+      }
+
+      .frf_toast_error {
+        background: #c75050;
+        color: #fff;
+      }
+
+      .frf_toast_info {
+        background: #67c1f5;
+        color: #fff;
+      }
+
+      /* 滚动条样式 */
+      .frf_settings_content::-webkit-scrollbar {
+        width: 8px;
+      }
+
+      .frf_settings_content::-webkit-scrollbar-track {
+        background: rgba(0, 0, 0, 0.2);
+      }
+
+      .frf_settings_content::-webkit-scrollbar-thumb {
+        background: #4a6278;
+        border-radius: 4px;
+      }
+
+      .frf_settings_content::-webkit-scrollbar-thumb:hover {
+        background: #5a7288;
+      }
+    `;
+
+    document.head.appendChild(style);
+  }
+}
+
+// 暴露到全局
+if (typeof window !== 'undefined') {
+  window.FRF_SettingsPanel = SettingsPanel;
+}
+
+
 // ==================== src/main.js ====================
 
 /**
- * FRF - Friend Review Finder v4.1
+ * FRF - Friend Review Finder v4.2
  * 主程序
  *
- * 双模式架构：
- * - 快速模式：单游戏搜索，遍历好友，获取最新数据（默认）
- * - 字典模式：利用已有缓存快速查询（需先构建字典）
+ * 智能缓存架构：
+ * - 快速模式：单游戏搜索，遍历好友，获取最新数据
+ * - 渐进式缓存：快速搜索结果自动同步到缓存
+ * - 后台更新：缓存命中时先显示，后台静默检查更新
  *
- * v4.1 新增：
- * - 分批渲染：每找到5篇评测立即渲染，提升用户体验
- * - 字典优先：有缓存时优先使用字典模式
- * - 字典初始化独立：buildDict 作为独立功能，不自动触发
+ * v4.2 改进：
+ * - 移除完整字典构建（耗时且易过时）
+ * - 新增后台静默更新机制
+ * - 发现数据改动时提示用户刷新
  */
 
 class FriendReviewFinder {
@@ -3290,22 +4126,6 @@ class FriendReviewFinder {
   }
 
   /**
-   * 刷新字典缓存
-   */
-  async refreshCache() {
-    this.logger.info('🔄 开始刷新评测字典...');
-
-    const friends = await this.steamAPI.getFriendsList();
-    await this.cache.buildCache(friends, (current, total) => {
-      if (current % 10 === 0 || current === total) {
-        this.logger.progress(current, total, '刷新字典');
-      }
-    });
-
-    this.logger.info('✅ 字典已刷新');
-  }
-
-  /**
    * 显示结果统计
    */
   showResults() {
@@ -3330,19 +4150,6 @@ class FriendReviewFinder {
       })));
     }
   }
-
-  /**
-   * 获取统计信息
-   */
-  getStats() {
-    return {
-      appId: this.appId,
-      totalReviews: this.reviews.length,
-      positive: this.reviews.filter(r => r.isPositive).length,
-      negative: this.reviews.filter(r => !r.isPositive).length,
-      cacheStats: this.cache.getCacheStats()
-    };
-  }
 }
 
 // ==================== 全局暴露 ====================
@@ -3352,12 +4159,12 @@ if (typeof window !== 'undefined') {
   // 全局辅助对象
   window.FRF = {
     /**
-     * 字典模式查询（仅在有缓存时工作）
-     * 不会自动构建字典，需要先调用 FRF.buildDict()
+     * 缓存查询（仅在有缓存时工作）
+     * 缓存通过快速搜索自动构建
      */
     test: async function(appId) {
       console.log(`%c========================================`, 'color: #47bfff; font-weight: bold;');
-      console.log(`%c  📚 字典模式查询 - 游戏 ${appId}`, 'color: #47bfff; font-weight: bold; font-size: 14px;');
+      console.log(`%c  📚 缓存查询 - 游戏 ${appId}`, 'color: #47bfff; font-weight: bold; font-size: 14px;');
       console.log(`%c========================================`, 'color: #47bfff; font-weight: bold;');
       console.log('');
 
@@ -3365,13 +4172,10 @@ if (typeof window !== 'undefined') {
       const cacheLoaded = cache.loadFromCache();
 
       if (!cacheLoaded) {
-        console.log('%c❌ 字典缓存不存在！', 'color: #ff5722; font-weight: bold;');
+        console.log('%c❌ 缓存不存在！', 'color: #ff5722; font-weight: bold;');
         console.log('');
-        console.log('💡 字典模式需要先构建字典缓存：');
-        console.log('   %cFRF.buildDict()%c - 构建字典（耗时1-3分钟，但只需执行一次）', 'color: #ff9800; font-weight: bold;', '');
-        console.log('');
-        console.log('🚀 或使用快速模式直接查询：');
-        console.log('   %cFRF.quick(' + appId + ')%c - 快速搜索此游戏', 'color: #ff9800; font-weight: bold;', '');
+        console.log('💡 缓存通过快速搜索自动构建：');
+        console.log('   %cFRF.quick(' + appId + ')%c - 快速搜索此游戏（结果自动缓存）', 'color: #ff9800; font-weight: bold;', '');
         return null;
       }
 
@@ -3379,13 +4183,13 @@ if (typeof window !== 'undefined') {
       const matchedFriends = cache.findFriendsWithReview(String(appId));
 
       if (matchedFriends.length === 0) {
-        console.log('😢 字典中没有此游戏的好友评测记录');
+        console.log('😢 缓存中没有此游戏的好友评测记录');
         console.log('');
         console.log('💡 可能原因：');
         console.log('   1. 你的好友没有评测过这款游戏');
-        console.log('   2. 字典构建后有新的好友评测了这款游戏');
+        console.log('   2. 这是你第一次访问此游戏页面');
         console.log('');
-        console.log('🚀 使用快速模式获取最新数据：');
+        console.log('🚀 使用快速模式获取数据：');
         console.log('   %cFRF.quick(' + appId + ')%c', 'color: #ff9800; font-weight: bold;', '');
         return [];
       }
@@ -3411,52 +4215,6 @@ if (typeof window !== 'undefined') {
     },
 
     /**
-     * 构建字典缓存（独立功能，耗时较长）
-     * 这是一个隐藏功能，将在后续添加到设置页面
-     */
-    buildDict: async function() {
-      console.log('%c========================================', 'color: #4caf50; font-weight: bold;');
-      console.log('%c  📚 构建字典缓存', 'color: #4caf50; font-weight: bold; font-size: 14px;');
-      console.log('%c========================================', 'color: #4caf50; font-weight: bold;');
-      console.log('');
-      console.log('%c⚠️ 注意：此过程需要 1-3 分钟，但只需执行一次', 'color: #ff9800;');
-      console.log('   构建完成后，字典模式查询将秒速完成');
-      console.log('');
-
-      const cache = new ReviewCache();
-      const steamAPI = new SteamAPI('0');
-
-      // 检查是否有未完成的构建
-      const savedProgress = cache.loadBuildProgress();
-      if (savedProgress) {
-        console.log(`📋 发现未完成的构建进度 (${savedProgress.processedCount}/${savedProgress.friendIds.length})`);
-        console.log('   使用 %cFRF.resumeBuild()%c 继续构建', 'color: #ff9800; font-weight: bold;', '');
-        console.log('   使用 %cFRF.clearProgress()%c 清除进度重新开始', 'color: #ff9800; font-weight: bold;', '');
-        return;
-      }
-
-      console.log('📥 获取好友列表...');
-      const friends = await steamAPI.getFriendsList();
-      console.log(`✅ 找到 ${friends.length} 个好友`);
-      console.log('');
-
-      window.frfCache = cache; // 保存实例以支持暂停/继续
-
-      await cache.buildCache(friends, (current, total, built) => {
-        if (current % 10 === 0 || current === total) {
-          const percent = Math.round(current / total * 100);
-          console.log(`📊 进度: ${current}/${total} (${percent}%) - 已收录 ${built} 篇评测`);
-        }
-      });
-
-      console.log('');
-      console.log('%c✅ 字典构建完成！', 'color: #4caf50; font-weight: bold;');
-      console.log('');
-      console.log('💡 现在可以使用字典模式快速查询：');
-      console.log('   %cFRF.test(appId)%c - 秒速查询任意游戏', 'color: #4caf50; font-weight: bold;', '');
-    },
-
-    /**
      * 获取当前页面的 App ID
      */
     getAppId: function() {
@@ -3471,61 +4229,12 @@ if (typeof window !== 'undefined') {
     },
 
     /**
-     * 刷新/构建字典缓存（支持暂停/继续）
-     */
-    refresh: async function() {
-      console.log('🔄 开始构建字典缓存...');
-      const cache = new ReviewCache();
-      const steamAPI = new SteamAPI('0');
-      const friends = await steamAPI.getFriendsList();
-
-      window.frfCache = cache; // 保存实例以支持暂停/继续
-      await cache.buildCache(friends);
-    },
-
-    /**
-     * 暂停字典构建
-     */
-    pauseBuild: function() {
-      if (window.frfCache) {
-        window.frfCache.pauseBuild();
-        console.log('⏸️ 字典构建已暂停');
-      } else {
-        console.log('❌ 没有正在进行的构建任务');
-      }
-    },
-
-    /**
-     * 继续字典构建
-     */
-    resumeBuild: async function() {
-      if (window.frfCache) {
-        await window.frfCache.resumeBuild();
-      } else {
-        // 尝试从 localStorage 恢复
-        const cache = new ReviewCache();
-        window.frfCache = cache;
-        await cache.resumeBuild();
-      }
-    },
-
-    /**
-     * 清除构建进度
-     */
-    clearProgress: function() {
-      const cache = new ReviewCache();
-      cache.clearBuildProgress();
-      console.log('✅ 构建进度已清除');
-    },
-
-    /**
      * 清除缓存
      */
     clearCache: function() {
       const cache = new ReviewCache();
       cache.clearCache();
-      cache.clearBuildProgress();
-      console.log('✅ 缓存和构建进度已清除');
+      console.log('✅ 缓存已清除');
     },
 
     /**
@@ -3630,39 +4339,34 @@ if (typeof window !== 'undefined') {
      */
     help: function() {
       console.log('%c========================================', 'color: #47bfff; font-weight: bold;');
-      console.log('%c  📖 FRF v4.1 使用指南', 'color: #47bfff; font-weight: bold; font-size: 16px;');
+      console.log('%c  📖 FRF v4.2 使用指南', 'color: #47bfff; font-weight: bold; font-size: 16px;');
       console.log('%c========================================', 'color: #47bfff; font-weight: bold;');
       console.log('');
-      console.log('%c🔧 自动修复（默认）:', 'color: #9c27b0; font-weight: bold;');
-      console.log('  FRF会自动检测Steam好友评测页面的渲染bug');
-      console.log('  检测到bug后自动修复，支持分批渲染（每5篇显示一次）');
+      console.log('%c🔧 自动模式（默认）:', 'color: #9c27b0; font-weight: bold;');
+      console.log('  FRF会自动检测Steam好友评测页面');
+      console.log('  有缓存时秒加载，同时后台检查更新');
+      console.log('  无缓存时自动执行快速搜索');
       console.log('');
-      console.log('%c🚀 快速模式:', 'color: #ff9800; font-weight: bold;');
-      console.log('  FRF.quick(appId)     - 单游戏快速搜索');
+      console.log('%c🚀 快速搜索:', 'color: #ff9800; font-weight: bold;');
+      console.log('  FRF.quick(appId)     - 快速搜索指定游戏');
       console.log('  FRF.pause()          - 暂停搜索');
       console.log('  FRF.resume()         - 继续搜索');
-      console.log('');
-      console.log('%c📚 字典模式:', 'color: #4caf50; font-weight: bold;');
-      console.log('  FRF.buildDict()      - 构建字典（首次需要1-3分钟）');
-      console.log('  FRF.test(appId)      - 字典模式查询（需先构建）');
-      console.log('  FRF.pauseBuild()     - 暂停构建');
-      console.log('  FRF.resumeBuild()    - 继续构建');
-      console.log('  FRF.stats()          - 查看缓存统计');
       console.log('');
       console.log('%c🖥️ UI渲染:', 'color: #e91e63; font-weight: bold;');
       console.log('  FRF.renderUI()       - 渲染好友评测到页面');
       console.log('  FRF.renderUI(true)   - 强制刷新重新获取');
       console.log('');
-      console.log('%c⚙️ 其他:', 'color: #9e9e9e;');
+      console.log('%c⚙️ 设置:', 'color: #9e9e9e;');
+      console.log('  FRF.openSettings()   - 打开设置面板');
       console.log('  FRF.getAppId()       - 获取当前页面游戏ID');
+      console.log('  FRF.stats()          - 查看缓存统计');
       console.log('  FRF.clearCache()     - 清除缓存');
-      console.log('  FRF.clearProgress()  - 清除构建进度');
       console.log('  FRF.setDebug(true)   - 开启调试模式');
       console.log('');
-      console.log('%c💡 模式说明:', 'color: #2196f3;');
-      console.log('  自动修复: 优先使用字典缓存，无缓存则使用快速模式');
-      console.log('  快速模式: 单游戏，最新数据，约42秒');
-      console.log('  字典模式: 多游戏秒速查询，需先构建字典');
+      console.log('%c💡 工作原理:', 'color: #2196f3;');
+      console.log('  1. 首次访问游戏页：快速搜索 (~42秒)，结果自动缓存');
+      console.log('  2. 再次访问同游戏：秒加载缓存，后台静默检查更新');
+      console.log('  3. 发现数据改动：页面顶部提示，点击可刷新');
       console.log('');
     },
 
@@ -3673,6 +4377,18 @@ if (typeof window !== 'undefined') {
      */
     _uiRenderer: null,
     _pageDetector: null,
+    _settingsPanel: null,
+
+    /**
+     * 打开设置面板
+     */
+    openSettings: function() {
+      if (!this._settingsPanel) {
+        this._settingsPanel = new SettingsPanel();
+        this._settingsPanel.init();
+      }
+      this._settingsPanel.open();
+    },
 
     /**
      * 渲染好友评测到页面（核心UI功能）
@@ -3735,7 +4451,7 @@ if (typeof window !== 'undefined') {
 
     /**
      * 为UI获取评测数据（智能选择模式）
-     * 优先级：字典缓存 > 快速模式
+     * 优先级：缓存秒加载 + 后台更新 > 快速模式
      *
      * @param {string} appId - 游戏ID
      * @param {boolean} forceRefresh - 是否强制刷新（忽略缓存）
@@ -3750,25 +4466,162 @@ if (typeof window !== 'undefined') {
         return await this._fetchReviewsQuickMode(appId);
       }
 
-      // 检查字典缓存
+      // 检查缓存
       const cacheLoaded = cache.loadFromCache();
 
       if (cacheLoaded) {
         const matchedFriends = cache.findFriendsWithReview(appId);
         if (matchedFriends.length > 0) {
-          console.log(`📚 字典命中！找到 ${matchedFriends.length} 个好友评测`);
-          // 使用字典模式：分批获取详细数据
-          return await this._fetchFullReviews(matchedFriends, appId);
+          console.log(`📚 缓存命中！找到 ${matchedFriends.length} 个好友评测`);
+          // 使用缓存数据：分批获取详细数据
+          const cachedReviews = await this._fetchFullReviews(matchedFriends, appId);
+
+          // 启动后台静默更新
+          this._backgroundUpdate(appId, cachedReviews);
+
+          return cachedReviews;
         } else {
-          console.log('📚 字典中无此游戏记录，切换到快速模式');
+          console.log('📚 缓存中无此游戏记录，切换到快速模式');
         }
       } else {
-        console.log('📚 无字典缓存，使用快速模式');
+        console.log('📚 无缓存，使用快速模式');
       }
 
       // 使用快速模式
       console.log('🚀 使用快速模式获取数据...');
       return await this._fetchReviewsQuickMode(appId);
+    },
+
+    /**
+     * 后台静默更新
+     * 在缓存加载完成后，后台运行快速搜索检查是否有数据改动
+     *
+     * @param {string} appId - 游戏ID
+     * @param {Array} cachedReviews - 缓存中的评测数据
+     */
+    _backgroundUpdate: async function(appId, cachedReviews) {
+      console.log('🔄 后台静默更新启动...');
+
+      try {
+        // 后台执行快速搜索（静默模式，不渲染）
+        const freshSteamIds = await this._quickScanForSteamIds(appId);
+
+        // 比较差异
+        const cachedSteamIds = cachedReviews.map(r => r.steamId);
+        const diff = this._compareReviewSets(cachedSteamIds, freshSteamIds);
+
+        if (diff.hasChanges) {
+          console.log(`🔔 后台更新发现数据改动: +${diff.added.length} -${diff.removed.length}`);
+          // 显示更新提示
+          this._showUpdateNotice(diff);
+
+          // 同步缓存：添加新评测，移除已删除的评测
+          const cache = new ReviewCache();
+          cache.loadFromCache();
+
+          // 添加新发现的评测
+          diff.added.forEach(steamId => {
+            cache.addReviewToCache(steamId, appId);
+          });
+
+          // 移除已删除的评测
+          diff.removed.forEach(steamId => {
+            cache.removeReviewFromCache(steamId, appId);
+          });
+
+          cache.saveToCache();
+          console.log(`🔗 缓存已更新: +${diff.added.length} -${diff.removed.length}`);
+        } else {
+          console.log('✅ 后台更新完成，数据无改动');
+        }
+      } catch (error) {
+        console.warn('后台更新失败:', error);
+      }
+    },
+
+    /**
+     * 快速扫描获取Steam IDs（不获取详细数据，只检查哪些好友有评测）
+     * 用于后台更新时快速比对
+     *
+     * @param {string} appId - 游戏ID
+     * @returns {Promise<Array<string>>} 有评测的好友Steam ID列表
+     */
+    _quickScanForSteamIds: async function(appId) {
+      const searcher = new QuickSearcher(appId);
+      searcher.batchSize = this._quickConfig.batchSize;
+      searcher.delay = this._quickConfig.delay;
+
+      const friendIds = await searcher.fetchFriendIds();
+      const steamIdsWithReview = [];
+
+      // 批量检查（不获取详细内容）
+      for (let i = 0; i < friendIds.length; i += searcher.batchSize) {
+        const batch = friendIds.slice(i, i + searcher.batchSize);
+
+        const results = await Promise.all(
+          batch.map(async (steamId) => {
+            try {
+              const result = await searcher.checkFriendReview(steamId, false);
+              return result ? steamId : null;
+            } catch {
+              return null;
+            }
+          })
+        );
+
+        results.filter(id => id !== null).forEach(id => {
+          steamIdsWithReview.push(id);
+        });
+
+        // 批次延迟
+        if (searcher.delay > 0 && i + searcher.batchSize < friendIds.length) {
+          await new Promise(r => setTimeout(r, searcher.delay));
+        }
+      }
+
+      return steamIdsWithReview;
+    },
+
+    /**
+     * 比较两组评测数据，找出差异
+     *
+     * @param {Array<string>} cachedIds - 缓存中的Steam ID列表
+     * @param {Array<string>} freshIds - 最新的Steam ID列表
+     * @returns {Object} 差异信息 { hasChanges, added, removed }
+     */
+    _compareReviewSets: function(cachedIds, freshIds) {
+      const cachedSet = new Set(cachedIds);
+      const freshSet = new Set(freshIds);
+
+      const added = freshIds.filter(id => !cachedSet.has(id));
+      const removed = cachedIds.filter(id => !freshSet.has(id));
+
+      return {
+        hasChanges: added.length > 0 || removed.length > 0,
+        added,
+        removed
+      };
+    },
+
+    /**
+     * 显示数据更新提示
+     *
+     * @param {Object} diff - 差异信息
+     */
+    _showUpdateNotice: function(diff) {
+      if (!this._uiRenderer) return;
+
+      // 构建提示消息
+      let message = '发现数据改动';
+      if (diff.added.length > 0 && diff.removed.length > 0) {
+        message = `发现数据改动（+${diff.added.length} 新增，-${diff.removed.length} 移除）`;
+      } else if (diff.added.length > 0) {
+        message = `发现 ${diff.added.length} 条新评测`;
+      } else if (diff.removed.length > 0) {
+        message = `有 ${diff.removed.length} 条评测已不可用`;
+      }
+
+      this._uiRenderer.showUpdateNotice(message);
     },
 
     /**
@@ -4002,6 +4855,13 @@ if (typeof window !== 'undefined') {
           self._uiRenderer.showWelcomeBanner();
           // 立即添加FRF刷新按钮
           self._uiRenderer.addRefreshButton();
+          // 初始化设置面板（会添加设置按钮）
+          if (!self._settingsPanel) {
+            self._settingsPanel = new SettingsPanel();
+            self._settingsPanel.init();
+            // 应用保存的设置
+            self._settingsPanel.applySavedSettings();
+          }
         }
       );
 
@@ -4019,15 +4879,14 @@ if (typeof window !== 'undefined') {
 
   // 欢迎信息
   console.log('%c========================================', 'color: #47bfff; font-weight: bold;');
-  console.log('%c  🚀 FRF v4.1 已加载', 'color: #47bfff; font-weight: bold; font-size: 16px;');
+  console.log('%c  🚀 FRF v4.2 已加载', 'color: #47bfff; font-weight: bold; font-size: 16px;');
   console.log('%c  Friend Review Finder', 'color: #47bfff;');
-  console.log('%c  自动修复Steam好友评测Bug + 分批渲染', 'color: #e91e63; font-weight: bold;');
+  console.log('%c  智能缓存 + 后台更新', 'color: #e91e63; font-weight: bold;');
   console.log('%c========================================', 'color: #47bfff; font-weight: bold;');
   console.log('');
   console.log('📖 输入 %cFRF.help()%c 查看使用说明', 'color: #ff9800; font-weight: bold;', '');
-  console.log('🔧 自动修复: 检测bug后自动修复，每5篇渲染一次');
-  console.log('🚀 快速模式: %cFRF.quick(appId)%c - 单游戏最新数据', 'color: #ff9800; font-weight: bold;', '');
-  console.log('📚 字典模式: %cFRF.buildDict()%c 构建 → %cFRF.test(appId)%c 查询', 'color: #4caf50; font-weight: bold;', '', 'color: #4caf50; font-weight: bold;', '');
+  console.log('🔧 智能缓存: 首次搜索后自动缓存，下次秒加载');
+  console.log('🔄 后台更新: 缓存加载后自动检查数据改动');
   console.log('');
 
   // 自动启动检测（延迟执行，等待页面加载完成）

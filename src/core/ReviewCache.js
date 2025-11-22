@@ -173,127 +173,6 @@ class ReviewCache {
   }
 
   /**
-   * 暂停构建
-   */
-  pauseBuild() {
-    if (this.isBuilding && !this.isPaused) {
-      this.isPaused = true;
-      this.logger.info('⏸️ 正在暂停...');
-    }
-  }
-
-  /**
-   * 继续构建
-   */
-  async resumeBuild() {
-    // 尝试从保存的进度恢复
-    const savedProgress = this.loadBuildProgress();
-    if (savedProgress) {
-      this.friendIds = savedProgress.friendIds;
-      this.currentIndex = savedProgress.currentIndex;
-      this.friendReviewsMap = savedProgress.data;
-      this.startTime = Date.now() - (savedProgress.elapsed || 0);
-    }
-
-    if (this.currentIndex < this.friendIds.length) {
-      this.isPaused = false;
-      this.isBuilding = true;
-      this.logger.info(`▶️ 继续构建 (${this.currentIndex}/${this.friendIds.length})...`);
-
-      await this.processFriends();
-    } else {
-      this.logger.info('❌ 没有可继续的构建任务');
-    }
-  }
-
-  /**
-   * 保存构建进度
-   */
-  saveBuildProgress() {
-    try {
-      const progress = {
-        friendIds: this.friendIds,
-        currentIndex: this.currentIndex,
-        data: this.friendReviewsMap,
-        elapsed: Date.now() - this.startTime,
-        timestamp: Date.now()
-      };
-      localStorage.setItem(this.progressKey, JSON.stringify(progress));
-      this.logger.debug('进度已保存');
-    } catch (error) {
-      this.logger.warn('保存进度失败', error);
-    }
-  }
-
-  /**
-   * 加载构建进度
-   */
-  loadBuildProgress() {
-    try {
-      const saved = localStorage.getItem(this.progressKey);
-      if (saved) {
-        return JSON.parse(saved);
-      }
-    } catch (error) {
-      this.logger.warn('加载进度失败', error);
-    }
-    return null;
-  }
-
-  /**
-   * 清除构建进度
-   */
-  clearBuildProgress() {
-    localStorage.removeItem(this.progressKey);
-  }
-
-  /**
-   * 获取构建状态
-   */
-  getBuildStatus() {
-    return {
-      isBuilding: this.isBuilding,
-      isPaused: this.isPaused,
-      currentIndex: this.currentIndex,
-      totalFriends: this.friendIds.length,
-      collectedFriends: Object.keys(this.friendReviewsMap).length,
-      progress: this.friendIds.length > 0
-        ? ((this.currentIndex / this.friendIds.length) * 100).toFixed(1)
-        : 0
-    };
-  }
-
-  /**
-   * 格式化时间
-   */
-  formatTime(ms) {
-    if (ms < 1000) return '< 1 秒';
-    const seconds = Math.floor(ms / 1000);
-    if (seconds < 60) return `${seconds} 秒`;
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = seconds % 60;
-    return `${minutes} 分 ${remainingSeconds} 秒`;
-  }
-
-  /**
-   * 处理单个好友
-   */
-  async processFriend(steamId) {
-    try {
-      const appIds = await this.extractor.extractFriendReviewGames(steamId);
-
-      // 只缓存有评测的好友
-      if (appIds.length > 0) {
-        this.friendReviewsMap[steamId] = appIds;
-      }
-
-    } catch (error) {
-      this.logger.warn(`处理好友 ${steamId} 失败`, error);
-      // 不中断整体流程
-    }
-  }
-
-  /**
    * 查找哪些好友评测了指定游戏
    * @param {string} appId - 游戏 App ID
    * @returns {Array<string>} Steam ID 数组
@@ -305,33 +184,6 @@ class ReviewCache {
 
     this.logger.info(`游戏 ${appId} 匹配到 ${matchedFriends.length} 个好友`);
     return matchedFriends;
-  }
-
-  /**
-   * 检查缓存是否存在且有效
-   * @returns {boolean}
-   */
-  hasCacheValidCache() {
-    const cached = localStorage.getItem(this.cacheKey);
-    if (!cached) {
-      return false;
-    }
-
-    try {
-      const { timestamp } = JSON.parse(cached);
-      const age = Date.now() - timestamp;
-
-      // 检查是否过期
-      if (age < Constants.CACHE_DURATION) {
-        return true;
-      } else {
-        this.logger.info('缓存已过期');
-        return false;
-      }
-    } catch (error) {
-      this.logger.warn('缓存解析失败', error);
-      return false;
-    }
   }
 
   /**
@@ -410,6 +262,24 @@ class ReviewCache {
     }
     if (!this.friendReviewsMap[steamId].includes(appId)) {
       this.friendReviewsMap[steamId].push(appId);
+    }
+  }
+
+  /**
+   * 从缓存中移除指定游戏的评测记录（用于后台更新发现删除的评测）
+   * @param {string} steamId - 好友 Steam ID
+   * @param {string} appId - 游戏 App ID
+   */
+  removeReviewFromCache(steamId, appId) {
+    if (this.friendReviewsMap[steamId]) {
+      const index = this.friendReviewsMap[steamId].indexOf(appId);
+      if (index !== -1) {
+        this.friendReviewsMap[steamId].splice(index, 1);
+        // 如果该好友没有评测记录了，删除整个条目
+        if (this.friendReviewsMap[steamId].length === 0) {
+          delete this.friendReviewsMap[steamId];
+        }
+      }
     }
   }
 

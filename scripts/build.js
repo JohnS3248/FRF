@@ -12,7 +12,14 @@ const MODE = process.argv.includes('--production') ? 'production' : 'development
 
 console.log(`\n📦 开始构建 (${MODE} 模式)...\n`);
 
-// 文件加载顺序（重要！）- v3.1 双模式架构 + UI自动修复
+// 读取 package.json 获取版本号（统一版本管理）
+const packageJson = JSON.parse(
+  fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')
+);
+const VERSION = packageJson.version;
+console.log(`📌 版本号: ${VERSION}\n`);
+
+// 文件加载顺序（重要！）- v5.0 设置面板
 const SOURCE_FILES = [
   'src/utils/constants.js',
   'src/utils/logger.js',
@@ -25,6 +32,7 @@ const SOURCE_FILES = [
   'src/core/SteamAPI.js',
   'src/ui/UIRenderer.js',             // UI渲染器（v3.1 新增）
   'src/ui/PageDetector.js',           // 页面检测器（v3.1 新增）
+  'src/ui/SettingsPanel.js',          // 设置面板（v4.2 新增）
   'src/main.js'
 ];
 
@@ -39,7 +47,13 @@ SOURCE_FILES.forEach(file => {
     process.exit(1);
   }
 
-  const content = fs.readFileSync(filePath, 'utf8');
+  let content = fs.readFileSync(filePath, 'utf8');
+
+  // 自动替换 constants.js 中的版本号
+  if (file === 'src/utils/constants.js') {
+    content = content.replace(/VERSION:\s*['"][^'"]+['"]/, `VERSION: '${VERSION}'`);
+  }
+
   console.log(`✓ 加载: ${file}`);
 
   combinedCode += `\n// ==================== ${file} ====================\n\n`;
@@ -54,8 +68,8 @@ if (MODE === 'development') {
 
   const devCode = `
 /**
- * FRF v3.1 - 开发测试版本
- * 双模式架构 + UI自动修复
+ * FRF v${VERSION} - 开发测试版本
+ * 智能缓存 + 设置面板
  *
  * 使用方法：
  * 1. 访问 Steam 好友评测页面（如 steamcommunity.com/app/413150/reviews/?browsefilter=createdbyfriends）
@@ -63,17 +77,15 @@ if (MODE === 'development') {
  * 3. 复制粘贴此文件全部内容并回车
  * 4. FRF会自动检测并修复Steam渲染bug
  *
- * UI渲染（v3.1 新增）：
+ * 工作原理：
+ * - 首次访问：快速搜索 (~42秒)，结果自动缓存
+ * - 再次访问：秒加载缓存，后台静默检查更新
+ * - 发现改动：页面顶部提示，点击可刷新
+ *
+ * 常用命令：
  * - FRF.renderUI()     渲染好友评测到页面
  * - FRF.renderUI(true) 强制刷新重新获取
- *
- * 快速模式：
  * - FRF.quick(413150)  快速搜索星露谷物语
- * - FRF.pause()        暂停搜索
- * - FRF.resume()       继续搜索
- *
- * 字典模式：
- * - FRF.test(413150)   字典模式查询
  * - FRF.stats()        查看缓存统计
  * - FRF.help()         查看帮助
  */
@@ -94,16 +106,11 @@ ${combinedCode}
   // 生产模式：生成油猴脚本文件
   const prodFile = path.join(__dirname, '..', 'dist', 'steam-friend-reviews-fixer.user.js');
 
-  // 读取 package.json 获取版本号
-  const packageJson = JSON.parse(
-    fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')
-  );
-
   const userscriptHeader = `// ==UserScript==
 // @name         Steam 好友评测修复工具
 // @name:en      Steam Friend Reviews Fixer
 // @namespace    https://github.com/JohnS3248/FRF
-// @version      ${packageJson.version}
+// @version      ${VERSION}
 // @description  自动修复 Steam 好友评测页面渲染 Bug，显示完整的好友评测列表
 // @description:en Auto-fix Steam friend reviews rendering bug, display complete friend review list
 // @author       JohnS3248
