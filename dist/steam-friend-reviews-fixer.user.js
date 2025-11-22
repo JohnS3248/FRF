@@ -2,7 +2,7 @@
 // @name         Steam 好友评测修复工具
 // @name:en      Steam Friend Reviews Fixer
 // @namespace    https://github.com/JohnS3248/FRF
-// @version      5.0.0
+// @version      5.1.0
 // @description  自动修复 Steam 好友评测页面渲染 Bug，显示完整的好友评测列表
 // @description:en Auto-fix Steam friend reviews rendering bug, display complete friend review list
 // @author       JohnS3248
@@ -31,7 +31,7 @@
 
 const Constants = {
   // ==================== 版本信息 ====================
-  VERSION: '5.0.0',
+  VERSION: '5.1.0',
   CACHE_VERSION: 'v2', // 渐进式缓存版本
 
   // ==================== 请求配置 ====================
@@ -1885,7 +1885,8 @@ class UIRenderer {
     const recommendText = review.isPositive ? '推荐' : '不推荐';
 
     // 截断过长的评测内容（安全截断，避免破坏HTML标签）
-    const maxContentLength = 300;
+    // 从设置读取截断长度，默认300
+    const maxContentLength = (window.FRF && window.FRF._uiConfig && window.FRF._uiConfig.contentTruncate) || 300;
     let displayContent = this.safeHTMLTruncate(review.reviewContent || '', maxContentLength);
 
     // 格式化有价值/欢乐人数（如果都为0则不显示）
@@ -2820,8 +2821,12 @@ if (typeof window !== 'undefined') {
 // ==================== src/ui/SettingsPanel.js ====================
 
 /**
- * 设置面板 UI 组件
+ * 设置面板 UI 组件 - v5.1
  * 提供用户可视化配置界面
+ *
+ * 分为两个标签页：
+ * - 常规设置：普通用户常用功能
+ * - 高级设置：开发者/高级用户选项
  */
 
 class SettingsPanel {
@@ -2830,6 +2835,7 @@ class SettingsPanel {
     this.isOpen = false;
     this.panelElement = null;
     this.overlayElement = null;
+    this.currentTab = 'general'; // 'general' | 'advanced'
   }
 
   /**
@@ -2897,7 +2903,7 @@ class SettingsPanel {
   }
 
   /**
-   * 构建面板 HTML
+   * 构建面板 HTML - 带标签页
    */
   buildPanelHTML() {
     return `
@@ -2906,73 +2912,124 @@ class SettingsPanel {
         <button class="frf_settings_close" title="关闭">✕</button>
       </div>
 
+      <!-- 标签页导航 -->
+      <div class="frf_tabs">
+        <button class="frf_tab frf_tab_active" data-tab="general">常规设置</button>
+        <button class="frf_tab" data-tab="advanced">高级设置</button>
+      </div>
+
       <div class="frf_settings_content">
-        <!-- 缓存管理 -->
-        <div class="frf_settings_section">
-          <h3>缓存管理</h3>
-          <div class="frf_settings_info" id="frf_cache_info">
-            <div class="frf_info_loading">正在加载缓存信息...</div>
+        <!-- ========== 常规设置 ========== -->
+        <div class="frf_tab_content frf_tab_content_active" data-tab="general">
+          <!-- 显示设置 -->
+          <div class="frf_settings_section">
+            <h3>显示设置</h3>
+            <div class="frf_settings_row">
+              <label for="frf_render_batch">每次渲染评测数</label>
+              <div class="frf_input_group">
+                <input type="number" id="frf_render_batch" min="1" max="20" value="3">
+                <span class="frf_input_hint">找到几篇后开始显示（推荐 3）</span>
+              </div>
+            </div>
+            <div class="frf_settings_row">
+              <label for="frf_content_truncate">评测内容截断长度</label>
+              <div class="frf_input_group">
+                <input type="number" id="frf_content_truncate" min="50" max="1000" value="300">
+                <span class="frf_input_hint">字符数（推荐 300）</span>
+              </div>
+            </div>
           </div>
-          <div class="frf_settings_actions">
-            <button class="frf_btn frf_btn_danger" id="frf_clear_cache">清除缓存</button>
-            <button class="frf_btn frf_btn_secondary" id="frf_refresh_stats">刷新统计</button>
+
+          <!-- 性能设置 -->
+          <div class="frf_settings_section">
+            <h3>性能设置</h3>
+            <div class="frf_settings_row">
+              <label for="frf_background_update">后台静默更新</label>
+              <div class="frf_toggle_group">
+                <label class="frf_toggle">
+                  <input type="checkbox" id="frf_background_update" checked>
+                  <span class="frf_toggle_slider"></span>
+                </label>
+                <span class="frf_input_hint">缓存加载后自动检查更新</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 缓存管理 -->
+          <div class="frf_settings_section">
+            <h3>缓存管理</h3>
+            <div class="frf_settings_info" id="frf_cache_info">
+              <div class="frf_info_loading">正在加载缓存信息...</div>
+            </div>
+            <div class="frf_settings_actions">
+              <button class="frf_btn frf_btn_danger" id="frf_clear_cache">清除缓存</button>
+              <button class="frf_btn frf_btn_secondary" id="frf_refresh_stats">刷新统计</button>
+            </div>
+          </div>
+
+          <!-- 关于 -->
+          <div class="frf_settings_section">
+            <h3>关于</h3>
+            <div class="frf_about_info">
+              <p><strong>FRF - Friend Review Finder</strong></p>
+              <p>版本：<span id="frf_version">${Constants.VERSION}</span></p>
+              <p>
+                <a href="https://github.com/JohnS3248/FRF" target="_blank">GitHub</a> ·
+                <a href="https://github.com/JohnS3248/FRF/issues" target="_blank">反馈问题</a>
+              </p>
+            </div>
           </div>
         </div>
 
-        <!-- 快速模式配置 -->
-        <div class="frf_settings_section">
-          <h3>快速模式配置</h3>
-          <div class="frf_settings_row">
-            <label for="frf_batch_size">批次大小</label>
-            <div class="frf_input_group">
-              <input type="number" id="frf_batch_size" min="1" max="50" value="30">
-              <span class="frf_input_hint">并发请求数（推荐 30）</span>
-            </div>
+        <!-- ========== 高级设置 ========== -->
+        <div class="frf_tab_content" data-tab="advanced">
+          <div class="frf_advanced_warning">
+            <span class="frf_warning_icon">⚠️</span>
+            <span>以下为高级选项，如不了解请勿修改</span>
           </div>
-          <div class="frf_settings_row">
-            <label for="frf_delay">批次延迟</label>
-            <div class="frf_input_group">
-              <input type="number" id="frf_delay" min="0" max="5000" value="0">
-              <span class="frf_input_hint">毫秒（推荐 0）</span>
-            </div>
-          </div>
-        </div>
 
-        <!-- 调试选项 -->
-        <div class="frf_settings_section">
-          <h3>调试选项</h3>
-          <div class="frf_settings_row">
-            <label for="frf_debug_mode">调试模式</label>
-            <div class="frf_toggle_group">
-              <label class="frf_toggle">
-                <input type="checkbox" id="frf_debug_mode">
-                <span class="frf_toggle_slider"></span>
-              </label>
-              <span class="frf_input_hint">显示详细日志</span>
+          <!-- 快速模式配置 -->
+          <div class="frf_settings_section">
+            <h3>快速模式配置</h3>
+            <div class="frf_settings_row">
+              <label for="frf_batch_size">批次大小</label>
+              <div class="frf_input_group">
+                <input type="number" id="frf_batch_size" min="1" max="50" value="30">
+                <span class="frf_input_hint">并发请求数（推荐 30）</span>
+              </div>
+            </div>
+            <div class="frf_settings_row">
+              <label for="frf_delay">批次延迟</label>
+              <div class="frf_input_group">
+                <input type="number" id="frf_delay" min="0" max="5000" value="0">
+                <span class="frf_input_hint">毫秒（推荐 0）</span>
+              </div>
             </div>
           </div>
-          <div class="frf_settings_row">
-            <label for="frf_quick_debug">快速模式调试</label>
-            <div class="frf_toggle_group">
-              <label class="frf_toggle">
-                <input type="checkbox" id="frf_quick_debug">
-                <span class="frf_toggle_slider"></span>
-              </label>
-              <span class="frf_input_hint">显示每个请求的响应时间</span>
-            </div>
-          </div>
-        </div>
 
-        <!-- 关于 -->
-        <div class="frf_settings_section">
-          <h3>关于</h3>
-          <div class="frf_about_info">
-            <p><strong>FRF - Friend Review Finder</strong></p>
-            <p>版本：<span id="frf_version">${Constants.VERSION}</span></p>
-            <p>
-              <a href="https://github.com/JohnS3248/FRF" target="_blank">GitHub</a> ·
-              <a href="https://github.com/JohnS3248/FRF/issues" target="_blank">反馈问题</a>
-            </p>
+          <!-- 调试选项 -->
+          <div class="frf_settings_section">
+            <h3>调试选项</h3>
+            <div class="frf_settings_row">
+              <label for="frf_debug_mode">调试模式</label>
+              <div class="frf_toggle_group">
+                <label class="frf_toggle">
+                  <input type="checkbox" id="frf_debug_mode">
+                  <span class="frf_toggle_slider"></span>
+                </label>
+                <span class="frf_input_hint">显示详细日志</span>
+              </div>
+            </div>
+            <div class="frf_settings_row">
+              <label for="frf_quick_debug">快速模式调试</label>
+              <div class="frf_toggle_group">
+                <label class="frf_toggle">
+                  <input type="checkbox" id="frf_quick_debug">
+                  <span class="frf_toggle_slider"></span>
+                </label>
+                <span class="frf_input_hint">显示每个请求的响应时间</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -2991,6 +3048,13 @@ class SettingsPanel {
     // 关闭按钮
     this.panelElement.querySelector('.frf_settings_close').addEventListener('click', () => {
       this.close();
+    });
+
+    // 标签页切换
+    this.panelElement.querySelectorAll('.frf_tab').forEach(tab => {
+      tab.addEventListener('click', (e) => {
+        this.switchTab(e.target.dataset.tab);
+      });
     });
 
     // 清除缓存
@@ -3017,6 +3081,31 @@ class SettingsPanel {
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && this.isOpen) {
         this.close();
+      }
+    });
+  }
+
+  /**
+   * 切换标签页
+   */
+  switchTab(tabName) {
+    this.currentTab = tabName;
+
+    // 更新标签按钮状态
+    this.panelElement.querySelectorAll('.frf_tab').forEach(tab => {
+      if (tab.dataset.tab === tabName) {
+        tab.classList.add('frf_tab_active');
+      } else {
+        tab.classList.remove('frf_tab_active');
+      }
+    });
+
+    // 更新内容区域
+    this.panelElement.querySelectorAll('.frf_tab_content').forEach(content => {
+      if (content.dataset.tab === tabName) {
+        content.classList.add('frf_tab_content_active');
+      } else {
+        content.classList.remove('frf_tab_content_active');
       }
     });
   }
@@ -3068,31 +3157,62 @@ class SettingsPanel {
    * 加载当前设置到表单
    */
   loadSettings() {
-    // 从 FRF 对象读取当前配置
+    const settings = this.loadFromStorage() || {};
+
+    // 常规设置
+    this.panelElement.querySelector('#frf_render_batch').value = settings.renderBatch || 3;
+    this.panelElement.querySelector('#frf_content_truncate').value = settings.contentTruncate || 300;
+    this.panelElement.querySelector('#frf_background_update').checked = settings.backgroundUpdate !== false; // 默认开启
+
+    // 高级设置
     if (window.FRF && window.FRF._quickConfig) {
       const config = window.FRF._quickConfig;
-      this.panelElement.querySelector('#frf_batch_size').value = config.batchSize || 30;
-      this.panelElement.querySelector('#frf_delay').value = config.delay || 0;
-      this.panelElement.querySelector('#frf_quick_debug').checked = config.debug || false;
+      this.panelElement.querySelector('#frf_batch_size').value = settings.batchSize || config.batchSize || 30;
+      this.panelElement.querySelector('#frf_delay').value = settings.delay || config.delay || 0;
+      this.panelElement.querySelector('#frf_quick_debug').checked = settings.quickDebug || config.debug || false;
+    } else {
+      this.panelElement.querySelector('#frf_batch_size').value = settings.batchSize || 30;
+      this.panelElement.querySelector('#frf_delay').value = settings.delay || 0;
+      this.panelElement.querySelector('#frf_quick_debug').checked = settings.quickDebug || false;
     }
 
     // 调试模式
-    this.panelElement.querySelector('#frf_debug_mode').checked = Constants.DEBUG_MODE || false;
+    this.panelElement.querySelector('#frf_debug_mode').checked = settings.debugMode || Constants.DEBUG_MODE || false;
 
     // 加载缓存统计
     this.loadCacheStats();
+
+    // 重置到常规标签页
+    this.switchTab('general');
   }
 
   /**
    * 保存设置
    */
   saveSettings() {
+    // 常规设置
+    const renderBatch = parseInt(this.panelElement.querySelector('#frf_render_batch').value, 10);
+    const contentTruncate = parseInt(this.panelElement.querySelector('#frf_content_truncate').value, 10);
+    const backgroundUpdate = this.panelElement.querySelector('#frf_background_update').checked;
+
+    // 高级设置
     const batchSize = parseInt(this.panelElement.querySelector('#frf_batch_size').value, 10);
     const delay = parseInt(this.panelElement.querySelector('#frf_delay').value, 10);
     const debugMode = this.panelElement.querySelector('#frf_debug_mode').checked;
     const quickDebug = this.panelElement.querySelector('#frf_quick_debug').checked;
 
-    // 验证
+    // 验证常规设置
+    if (renderBatch < 1 || renderBatch > 20) {
+      this.showToast('每次渲染数必须在 1-20 之间', 'error');
+      return;
+    }
+
+    if (contentTruncate < 50 || contentTruncate > 1000) {
+      this.showToast('截断长度必须在 50-1000 之间', 'error');
+      return;
+    }
+
+    // 验证高级设置
     if (batchSize < 1 || batchSize > 50) {
       this.showToast('批次大小必须在 1-50 之间', 'error');
       return;
@@ -3103,18 +3223,31 @@ class SettingsPanel {
       return;
     }
 
-    // 应用设置
+    // 应用设置到 FRF
     if (window.FRF) {
+      // 高级设置
       window.FRF.setQuickConfig({
         batchSize,
         delay,
         debug: quickDebug
       });
       window.FRF.setDebug(debugMode);
+
+      // 常规设置（存储到 FRF 对象）
+      window.FRF._uiConfig = {
+        renderBatch,
+        contentTruncate,
+        backgroundUpdate
+      };
     }
 
     // 保存到 localStorage
     this.saveToStorage({
+      // 常规
+      renderBatch,
+      contentTruncate,
+      backgroundUpdate,
+      // 高级
       batchSize,
       delay,
       debugMode,
@@ -3122,14 +3255,19 @@ class SettingsPanel {
     });
 
     this.showToast('设置已保存', 'success');
-    this.logger.info('设置已保存', { batchSize, delay, debugMode, quickDebug });
+    this.logger.info('设置已保存', { renderBatch, contentTruncate, backgroundUpdate, batchSize, delay, debugMode, quickDebug });
   }
 
   /**
    * 恢复默认设置
    */
   resetSettings() {
-    // 默认值
+    // 常规设置默认值
+    this.panelElement.querySelector('#frf_render_batch').value = 3;
+    this.panelElement.querySelector('#frf_content_truncate').value = 300;
+    this.panelElement.querySelector('#frf_background_update').checked = true;
+
+    // 高级设置默认值
     this.panelElement.querySelector('#frf_batch_size').value = 30;
     this.panelElement.querySelector('#frf_delay').value = 0;
     this.panelElement.querySelector('#frf_debug_mode').checked = false;
@@ -3184,6 +3322,7 @@ class SettingsPanel {
   applySavedSettings() {
     const settings = this.loadFromStorage();
     if (settings && window.FRF) {
+      // 高级设置
       window.FRF.setQuickConfig({
         batchSize: settings.batchSize || 30,
         delay: settings.delay || 0,
@@ -3193,6 +3332,13 @@ class SettingsPanel {
       if (settings.debugMode) {
         Constants.DEBUG_MODE = true;
       }
+
+      // 常规设置
+      window.FRF._uiConfig = {
+        renderBatch: settings.renderBatch || 3,
+        contentTruncate: settings.contentTruncate || 300,
+        backgroundUpdate: settings.backgroundUpdate !== false
+      };
 
       this.logger.info('已应用保存的设置', settings);
     }
@@ -3297,7 +3443,7 @@ class SettingsPanel {
         top: 50%;
         left: 50%;
         transform: translate(-50%, -50%) scale(0.9);
-        width: 500px;
+        width: 520px;
         max-width: 90vw;
         max-height: 85vh;
         background: linear-gradient(180deg, #2a475e 0%, #1b2838 100%);
@@ -3351,11 +3497,75 @@ class SettingsPanel {
         color: #fff;
       }
 
+      /* 标签页导航 */
+      .frf_tabs {
+        display: flex;
+        padding: 0 20px;
+        background: rgba(0, 0, 0, 0.15);
+        border-bottom: 1px solid #4a6278;
+      }
+
+      .frf_tab {
+        padding: 12px 20px;
+        background: transparent;
+        border: none;
+        color: #8f98a0;
+        font-size: 14px;
+        cursor: pointer;
+        transition: all 0.2s;
+        position: relative;
+      }
+
+      .frf_tab:hover {
+        color: #c6d4df;
+      }
+
+      .frf_tab_active {
+        color: #67c1f5;
+      }
+
+      .frf_tab_active::after {
+        content: '';
+        position: absolute;
+        bottom: -1px;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background: #67c1f5;
+      }
+
+      /* 标签页内容 */
+      .frf_tab_content {
+        display: none;
+      }
+
+      .frf_tab_content_active {
+        display: block;
+      }
+
       /* 面板内容 */
       .frf_settings_content {
         flex: 1;
         overflow-y: auto;
         padding: 20px;
+      }
+
+      /* 高级设置警告 */
+      .frf_advanced_warning {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        background: rgba(255, 152, 0, 0.15);
+        border: 1px solid rgba(255, 152, 0, 0.3);
+        border-radius: 4px;
+        margin-bottom: 20px;
+        font-size: 12px;
+        color: #ffc107;
+      }
+
+      .frf_warning_icon {
+        font-size: 16px;
       }
 
       /* 设置区块 */
@@ -4181,12 +4391,13 @@ if (typeof window !== 'undefined') {
 
     /**
      * 快速模式获取完整评测数据（用于UI）
-     * 分批渲染：每找到5篇评测立即渲染
+     * 分批渲染：每找到N篇评测立即渲染（N由设置控制）
      */
     _fetchReviewsQuickMode: async function(appId) {
       const reviews = [];
       const pendingRender = []; // 待渲染队列
-      const RENDER_BATCH_SIZE = 5; // 每5篇渲染一次
+      // 从设置读取渲染批次大小，默认3
+      const RENDER_BATCH_SIZE = (this._uiConfig && this._uiConfig.renderBatch) || 3;
       const extractor = new ReviewExtractor();
 
       const searcher = new QuickSearcher(appId);
@@ -4272,12 +4483,13 @@ if (typeof window !== 'undefined') {
 
     /**
      * 从字典模式获取完整评测数据
-     * 分批渲染：每获取5篇评测立即渲染
+     * 分批渲染：每获取N篇评测立即渲染（N由设置控制）
      */
     _fetchFullReviews: async function(friendIds, appId) {
       const reviews = [];
       const pendingRender = []; // 待渲染队列
-      const RENDER_BATCH_SIZE = 5; // 每5篇渲染一次
+      // 从设置读取渲染批次大小，默认3
+      const RENDER_BATCH_SIZE = (this._uiConfig && this._uiConfig.renderBatch) || 3;
       const extractor = new ReviewExtractor();
       const total = friendIds.length;
       let current = 0;

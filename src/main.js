@@ -508,12 +508,13 @@ if (typeof window !== 'undefined') {
 
     /**
      * 快速模式获取完整评测数据（用于UI）
-     * 分批渲染：每找到5篇评测立即渲染
+     * 分批渲染：每找到N篇评测立即渲染（N由设置控制）
      */
     _fetchReviewsQuickMode: async function(appId) {
       const reviews = [];
       const pendingRender = []; // 待渲染队列
-      const RENDER_BATCH_SIZE = 5; // 每5篇渲染一次
+      // 从设置读取渲染批次大小，默认3
+      const RENDER_BATCH_SIZE = (this._uiConfig && this._uiConfig.renderBatch) || 3;
       const extractor = new ReviewExtractor();
 
       const searcher = new QuickSearcher(appId);
@@ -599,12 +600,13 @@ if (typeof window !== 'undefined') {
 
     /**
      * 从字典模式获取完整评测数据
-     * 分批渲染：每获取5篇评测立即渲染
+     * 分批渲染：每获取N篇评测立即渲染（N由设置控制）
      */
     _fetchFullReviews: async function(friendIds, appId) {
       const reviews = [];
       const pendingRender = []; // 待渲染队列
-      const RENDER_BATCH_SIZE = 5; // 每5篇渲染一次
+      // 从设置读取渲染批次大小，默认3
+      const RENDER_BATCH_SIZE = (this._uiConfig && this._uiConfig.renderBatch) || 3;
       const extractor = new ReviewExtractor();
       const total = friendIds.length;
       let current = 0;
