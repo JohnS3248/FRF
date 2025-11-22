@@ -311,6 +311,7 @@ if (typeof window !== 'undefined') {
 
       try {
         // 决定使用哪种模式获取数据
+        // 注意：_fetchReviewsForUI 内部会边获取边渲染，返回时已渲染完成
         const reviews = await this._fetchReviewsForUI(appId, forceRefresh);
 
         if (reviews.length === 0) {
@@ -320,8 +321,8 @@ if (typeof window !== 'undefined') {
           return;
         }
 
-        // 渲染评测卡片
-        this._uiRenderer.renderAll(reviews);
+        // 渲染已在 _fetchReviewsForUI 内部完成，这里只需确保加载状态已隐藏
+        this._uiRenderer.hideLoading();
 
         console.log(`✅ 渲染完成，共 ${reviews.length} 条好友评测`);
 
