@@ -1,5 +1,5 @@
 /**
- * FRF - Friend Review Finder v4.2
+ * FRF - Friend Review Finder v5.0
  * 主程序
  *
  * 智能缓存架构：
@@ -7,141 +7,14 @@
  * - 渐进式缓存：快速搜索结果自动同步到缓存
  * - 后台更新：缓存命中时先显示，后台静默检查更新
  *
- * v4.2 改进：
- * - 移除完整字典构建（耗时且易过时）
- * - 新增后台静默更新机制
- * - 发现数据改动时提示用户刷新
+ * v5.0 改进：
+ * - 移除废弃的 FriendReviewFinder 类
+ * - 精简代码结构
+ * - 新增设置面板
  */
-
-class FriendReviewFinder {
-  constructor(appId) {
-    this.appId = String(appId); // 确保 appId 为字符串
-    this.logger = new Logger('Main');
-    this.cache = new ReviewCache();
-    this.steamAPI = new SteamAPI(this.appId);
-
-    this.reviews = [];
-    this.friends = [];
-  }
-
-  /**
-   * 核心方法：获取好友评测（优化版）
-   * @returns {Promise<Array>} 评测数据数组
-   */
-  async fetchReviews() {
-    this.logger.info('========================================');
-    this.logger.info('  FRF - Friend Review Finder v3.0');
-    this.logger.info('  字典模式 - 多游戏快速查询');
-    this.logger.info('========================================');
-
-    try {
-      // ========== 阶段 1：获取/加载字典 ==========
-      let cacheLoaded = this.cache.loadFromCache();
-
-      if (!cacheLoaded) {
-        this.logger.info('');
-        this.logger.info('🔄 首次使用，正在构建评测字典...');
-        this.logger.info('   （此过程需要 1-3 分钟，但只需执行一次）');
-        this.logger.info('');
-
-        // 获取好友列表
-        this.friends = await this.steamAPI.getFriendsList();
-
-        // 构建字典
-        await this.cache.buildCache(this.friends, (current, total, built) => {
-          if (current % 10 === 0 || current === total) {
-            this.logger.progress(current, total, `构建字典`);
-          }
-        });
-
-        this.logger.info('');
-        this.logger.info('✅ 字典构建完成！已缓存，下次使用将秒速启动');
-        this.logger.info('');
-
-      } else {
-        this.logger.info('✅ 从缓存加载字典（瞬间完成）');
-
-        // 显示缓存统计
-        const stats = this.cache.getCacheStats();
-        this.logger.info(`   📊 缓存信息: ${stats.friendsWithReviews} 个好友, ${stats.totalReviews} 篇评测, ${stats.cacheAge} 小时前更新`);
-        this.logger.info('');
-      }
-
-      // ========== 阶段 2：快速查询 ==========
-      this.logger.info(`🔍 正在查询游戏 ${this.appId} 的好友评测...`);
-
-      const matchedFriends = this.cache.findFriendsWithReview(this.appId);
-
-      if (matchedFriends.length === 0) {
-        this.logger.info('😢 没有好友评测过这款游戏');
-        this.logger.info('');
-        return [];
-      }
-
-      this.logger.info(`🎯 找到 ${matchedFriends.length} 个好友评测了这款游戏`);
-      this.logger.info('');
-
-      // ========== 阶段 3：获取详细数据 ==========
-      this.logger.info('📥 正在获取详细评测数据...');
-
-      this.reviews = await this.steamAPI.batchGetReviews(matchedFriends, (current, total, found) => {
-        if (current % 5 === 0 || current === total) {
-          this.logger.progress(current, total, `详细数据`);
-        }
-      });
-
-      // ========== 阶段 4：输出结果 ==========
-      this.logger.info('');
-      this.logger.info('========================================');
-      this.logger.info('  ✅ 查询完成！');
-      this.logger.info('========================================');
-
-      this.showResults();
-
-      // 保存到全局
-      window.frfReviews = this.reviews;
-      this.logger.info('💾 评测数据已保存到 window.frfReviews');
-      this.logger.info('');
-
-      return this.reviews;
-
-    } catch (error) {
-      this.logger.error('获取评测失败', error);
-      throw error;
-    }
-  }
-
-  /**
-   * 显示结果统计
-   */
-  showResults() {
-    const positive = this.reviews.filter(r => r.isPositive).length;
-    const negative = this.reviews.length - positive;
-
-    this.logger.info(`📊 找到 ${this.reviews.length} 篇评测`);
-    this.logger.info(`   👍 推荐: ${positive} 篇`);
-    this.logger.info(`   👎 不推荐: ${negative} 篇`);
-    this.logger.info('');
-
-    // 显示详细列表
-    if (this.reviews.length > 0) {
-      this.logger.info('📋 评测列表:');
-      this.logger.table(this.reviews.map((r, i) => ({
-        '#': i + 1,
-        '推荐': r.isPositive ? '👍' : '👎',
-        '时长': `${r.totalHours}h`,
-        '发布': r.publishDate,
-        '更新': r.updateDate || '-',
-        'Steam ID': r.steamId
-      })));
-    }
-  }
-}
 
 // ==================== 全局暴露 ====================
 if (typeof window !== 'undefined') {
-  window.FRF_FriendReviewFinder = FriendReviewFinder;
-
   // 全局辅助对象
   window.FRF = {
     /**
@@ -184,20 +57,43 @@ if (typeof window !== 'undefined') {
       console.log('');
 
       // 获取详细数据
-      const finder = new FriendReviewFinder(appId);
-      finder.cache = cache;
       const steamAPI = new SteamAPI(appId);
-      finder.reviews = await steamAPI.batchGetReviews(matchedFriends, (current, total, found) => {
+      const reviews = await steamAPI.batchGetReviews(matchedFriends, (current, total, found) => {
         if (current % 5 === 0 || current === total) {
           console.log(`📊 进度: ${current}/${total}`);
         }
       });
 
-      finder.showResults();
-      window.frfReviews = finder.reviews;
+      // 显示结果统计
+      const positive = reviews.filter(r => r.isPositive).length;
+      const negative = reviews.length - positive;
+
+      console.log('');
+      console.log('========================================');
+      console.log('  ✅ 查询完成！');
+      console.log('========================================');
+      console.log(`📊 找到 ${reviews.length} 篇评测`);
+      console.log(`   👍 推荐: ${positive} 篇`);
+      console.log(`   👎 不推荐: ${negative} 篇`);
+      console.log('');
+
+      // 显示详细列表
+      if (reviews.length > 0) {
+        console.log('📋 评测列表:');
+        console.table(reviews.map((r, i) => ({
+          '#': i + 1,
+          '推荐': r.isPositive ? '👍' : '👎',
+          '时长': `${r.totalHours}h`,
+          '发布': r.publishDate,
+          '更新': r.updateDate || '-',
+          'Steam ID': r.steamId
+        })));
+      }
+
+      window.frfReviews = reviews;
       console.log('💾 评测数据已保存到 window.frfReviews');
 
-      return finder;
+      return reviews;
     },
 
     /**
@@ -246,7 +142,7 @@ if (typeof window !== 'undefined') {
     },
 
     /**
-     * 快速模式 - 单游戏搜索（v3.0 新增）
+     * 快速模式 - 单游戏搜索
      */
     // 快速模式配置（已优化：基于实测数据）
     _quickConfig: {
@@ -325,7 +221,7 @@ if (typeof window !== 'undefined') {
      */
     help: function() {
       console.log('%c========================================', 'color: #47bfff; font-weight: bold;');
-      console.log('%c  📖 FRF v4.2 使用指南', 'color: #47bfff; font-weight: bold; font-size: 16px;');
+      console.log('%c  📖 FRF v5.0 使用指南', 'color: #47bfff; font-weight: bold; font-size: 16px;');
       console.log('%c========================================', 'color: #47bfff; font-weight: bold;');
       console.log('');
       console.log('%c🔧 自动模式（默认）:', 'color: #9c27b0; font-weight: bold;');
@@ -865,9 +761,9 @@ if (typeof window !== 'undefined') {
 
   // 欢迎信息
   console.log('%c========================================', 'color: #47bfff; font-weight: bold;');
-  console.log('%c  🚀 FRF v4.2 已加载', 'color: #47bfff; font-weight: bold; font-size: 16px;');
+  console.log('%c  🚀 FRF v' + Constants.VERSION + ' 已加载', 'color: #47bfff; font-weight: bold; font-size: 16px;');
   console.log('%c  Friend Review Finder', 'color: #47bfff;');
-  console.log('%c  智能缓存 + 后台更新', 'color: #e91e63; font-weight: bold;');
+  console.log('%c  智能缓存 + 设置面板', 'color: #e91e63; font-weight: bold;');
   console.log('%c========================================', 'color: #47bfff; font-weight: bold;');
   console.log('');
   console.log('📖 输入 %cFRF.help()%c 查看使用说明', 'color: #ff9800; font-weight: bold;', '');
