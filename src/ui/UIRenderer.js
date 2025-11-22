@@ -1,0 +1,749 @@
+/**
+ * UI渲染器
+ * 生成Steam原生风格的评测卡片，注入到页面中
+ */
+
+class UIRenderer {
+  constructor() {
+    this.logger = new Logger('UIRenderer');
+    this.container = null;
+    this.loadingElement = null;
+  }
+
+  /**
+   * 初始化渲染器，获取或创建目标容器
+   */
+  init() {
+    // 注入样式
+    this.injectStyles();
+
+    // 尝试获取现有容器
+    this.container = document.querySelector('#AppHubCards');
+
+    if (this.container) {
+      this.logger.info('UIRenderer 初始化成功（使用现有容器）');
+      return true;
+    }
+
+    // 容器不存在（Steam bug页面），需要创建
+    this.logger.info('未找到 #AppHubCards，尝试创建容器...');
+
+    // 查找合适的插入位置
+    // Steam页面结构：.apphub_HomeHeaderContent 之后是 #apphub_InitialContent
+    // 我们要在 .apphub_HomeHeaderContent 的父元素(.apphub_background)内
+    // 在 .apphub_HomeHeaderContent 之后插入
+
+    // 优先级1：在 #apphub_InitialContent 后面（原始bug位置之后）
+    const initialContent = document.querySelector('#apphub_InitialContent');
+    if (initialContent) {
+      this.container = this.createContainer();
+      initialContent.parentNode.insertBefore(this.container, initialContent.nextSibling);
+      this.logger.info('UIRenderer 初始化成功（在 apphub_InitialContent 后创建容器）');
+      return true;
+    }
+
+    // 优先级2：在 .apphub_HomeHeaderContent 之后
+    const headerContent = document.querySelector('.apphub_HomeHeaderContent');
+    if (headerContent && headerContent.parentNode) {
+      this.container = this.createContainer();
+      // 插入到 headerContent 后面的下一个兄弟节点之后
+      const nextSibling = headerContent.nextElementSibling;
+      if (nextSibling) {
+        headerContent.parentNode.insertBefore(this.container, nextSibling.nextSibling);
+      } else {
+        headerContent.parentNode.appendChild(this.container);
+      }
+      this.logger.info('UIRenderer 初始化成功（在 apphub_HomeHeaderContent 后创建容器）');
+      return true;
+    }
+
+    // 优先级3：apphub_background 内部
+    const background = document.querySelector('.apphub_background');
+    if (background) {
+      this.container = this.createContainer();
+      background.appendChild(this.container);
+      this.logger.info('UIRenderer 初始化成功（在 apphub_background 内创建容器）');
+      return true;
+    }
+
+    // 优先级4：ModalContentContainer 内部
+    const modalContainer = document.querySelector('#ModalContentContainer');
+    if (modalContainer) {
+      this.container = this.createContainer();
+      modalContainer.appendChild(this.container);
+      this.logger.info('UIRenderer 初始化成功（在 ModalContentContainer 内创建容器）');
+      return true;
+    }
+
+    this.logger.error('无法找到合适的容器插入位置');
+    return false;
+  }
+
+  /**
+   * 创建评测卡片容器
+   * @returns {HTMLElement}
+   */
+  createContainer() {
+    const container = document.createElement('div');
+    container.id = 'AppHubCards';
+    container.className = 'apphub_CardContentContainer frf_container';
+    // 使用与Steam原生一致的样式
+    container.style.cssText = 'clear: both;';
+    return container;
+  }
+
+  /**
+   * 清空容器内容
+   */
+  clear() {
+    if (this.container) {
+      this.container.innerHTML = '';
+    }
+  }
+
+  /**
+   * 显示加载状态
+   * @param {string} message - 加载提示消息
+   */
+  showLoading(message = '正在加载好友评测...') {
+    if (!this.container) return;
+
+    this.loadingElement = document.createElement('div');
+    this.loadingElement.className = 'frf_loading';
+    this.loadingElement.innerHTML = `
+      <div class="frf_loading_content">
+        <img src="https://community.fastly.steamstatic.com/public/images/login/throbber.gif" alt="Loading">
+        <span class="frf_loading_text">${message}</span>
+      </div>
+    `;
+
+    // 添加样式
+    this.injectStyles();
+
+    this.container.appendChild(this.loadingElement);
+  }
+
+  /**
+   * 显示修复中提示（在原bug区域显示）
+   */
+  showFixingNotice() {
+    // 确保样式已注入
+    this.injectStyles();
+
+    // 在原来bug显示的位置（#apphub_InitialContent之后或其位置）显示提示
+    const initialContent = document.querySelector('#apphub_InitialContent');
+    const headerContent = document.querySelector('.apphub_HomeHeaderContent');
+
+    // 检查是否已存在
+    if (document.querySelector('.frf_fixing_notice')) return;
+
+    const notice = document.createElement('div');
+    notice.className = 'frf_fixing_notice';
+    notice.innerHTML = `
+      <div class="frf_notice_content">
+        <img src="https://community.fastly.steamstatic.com/public/images/login/throbber.gif" alt="Loading">
+        <span class="frf_notice_text">正在检测好友评测...</span>
+      </div>
+    `;
+
+    // 找合适的插入位置
+    if (initialContent && initialContent.parentNode) {
+      initialContent.parentNode.insertBefore(notice, initialContent.nextSibling);
+      this.logger.info('显示修复提示（在 apphub_InitialContent 后）');
+    } else if (headerContent && headerContent.parentNode) {
+      headerContent.parentNode.insertBefore(notice, headerContent.nextSibling);
+      this.logger.info('显示修复提示（在 apphub_HomeHeaderContent 后）');
+    } else {
+      // 备选：添加到 body
+      document.body.appendChild(notice);
+      this.logger.info('显示修复提示（添加到 body）');
+    }
+  }
+
+  /**
+   * 隐藏修复中提示
+   */
+  hideFixingNotice() {
+    const notice = document.querySelector('.frf_fixing_notice');
+    if (notice) {
+      notice.remove();
+    }
+  }
+
+  /**
+   * 更新加载进度
+   * @param {number} checked - 已检查好友数
+   * @param {number} total - 总好友数
+   * @param {number} found - 已找到评测数
+   */
+  updateProgress(checked, total, found = 0) {
+    if (this.loadingElement) {
+      const textElement = this.loadingElement.querySelector('.frf_loading_text');
+      if (textElement) {
+        textElement.textContent = `正在加载好友评测... 已检查 ${checked}/${total}，找到 ${found} 篇`;
+      }
+    }
+  }
+
+  /**
+   * 隐藏加载状态
+   */
+  hideLoading() {
+    if (this.loadingElement) {
+      this.loadingElement.remove();
+      this.loadingElement = null;
+    }
+  }
+
+  /**
+   * 渲染单个评测卡片
+   * @param {Object} review - 评测数据对象
+   * @returns {HTMLElement} 卡片元素
+   */
+  renderCard(review) {
+    const card = document.createElement('div');
+    // 使用自定义class，避免Steam CSS干扰
+    card.className = 'frf_card';
+    card.setAttribute('role', 'button');
+
+    // 构建卡片HTML
+    card.innerHTML = this.buildCardHTML(review);
+
+    // 添加点击事件（打开评测详情）
+    card.addEventListener('click', (e) => {
+      // 如果点击的是链接，不处理
+      if (e.target.tagName === 'A' || e.target.closest('a')) return;
+      window.open(`https://steamcommunity.com${review.url}`, '_blank');
+    });
+
+    return card;
+  }
+
+  /**
+   * 构建卡片内部HTML - 完全自定义样式，避免Steam CSS干扰
+   * @param {Object} review - 评测数据
+   * @returns {string} HTML字符串
+   */
+  buildCardHTML(review) {
+    const thumbIcon = review.isPositive
+      ? 'https://community.fastly.steamstatic.com/public/shared/images/userreviews/icon_thumbsUp.png?v=1'
+      : 'https://community.fastly.steamstatic.com/public/shared/images/userreviews/icon_thumbsDown.png?v=1';
+
+    const recommendText = review.isPositive ? '推荐' : '不推荐';
+
+    // 截断过长的评测内容（安全截断，避免破坏HTML标签）
+    const maxContentLength = 300;
+    let displayContent = this.safeHTMLTruncate(review.reviewContent || '', maxContentLength);
+
+    // 格式化有价值人数
+    const helpfulText = review.helpfulCount > 0
+      ? `有 ${review.helpfulCount} 人觉得这篇评测有价值`
+      : '尚未有人觉得这篇评测有价值';
+
+    // 用户头像（使用默认头像作为后备）
+    const avatarUrl = review.userAvatar ||
+      'https://avatars.fastly.steamstatic.com/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_medium.jpg';
+
+    // 完全自定义HTML结构，使用frf_前缀避免Steam CSS干扰
+    return `
+      <div class="frf_card_inner">
+        <!-- 顶部：有价值人数 -->
+        <div class="frf_helpful_row">
+          <span class="frf_helpful_text">${helpfulText}</span>
+          <span class="frf_award">
+            <img src="https://community.fastly.steamstatic.com/public/shared/images/award_icon_blue.svg" class="frf_award_icon">
+            <span>0</span>
+          </span>
+        </div>
+
+        <!-- 推荐区域 -->
+        <div class="frf_recommend_row">
+          <img src="${thumbIcon}" class="frf_thumb_icon">
+          <div class="frf_recommend_info">
+            <div class="frf_recommend_title">${recommendText}</div>
+            <div class="frf_recommend_hours">总时数 ${review.totalHours} 小时</div>
+          </div>
+        </div>
+
+        <!-- 发布日期 -->
+        <div class="frf_date_row">发布于：${review.publishDate}</div>
+
+        <!-- 评测内容 -->
+        <div class="frf_content_row">${displayContent}</div>
+
+        <!-- 底部用户信息栏 -->
+        <div class="frf_author_row">
+          <div class="frf_author_left">
+            <a href="${review.userProfileUrl}" class="frf_avatar_link">
+              <img src="${avatarUrl}" class="frf_avatar_img">
+            </a>
+            <div class="frf_author_info">
+              <a href="${review.userProfileUrl}" class="frf_author_name">${review.userName}</a>
+              <div class="frf_author_tag">FRF 好友评测</div>
+            </div>
+          </div>
+          <div class="frf_comment_area">
+            <span class="frf_comment_icon">💬</span>
+            <span class="frf_comment_count">0</span>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  /**
+   * 批量渲染评测卡片
+   * @param {Array} reviews - 评测数据数组
+   */
+  renderAll(reviews) {
+    if (!this.container) {
+      this.logger.error('容器未初始化');
+      return;
+    }
+
+    this.hideLoading();
+    this.clear();
+
+    if (reviews.length === 0) {
+      this.showEmpty();
+      return;
+    }
+
+    reviews.forEach(review => {
+      const card = this.renderCard(review);
+      this.container.appendChild(card);
+    });
+
+    this.logger.info(`渲染完成，共 ${reviews.length} 条评测`);
+  }
+
+  /**
+   * 追加单个评测卡片（用于逐步显示）
+   * @param {Object} review - 评测数据
+   */
+  appendCard(review) {
+    if (!this.container) return;
+
+    const card = this.renderCard(review);
+    this.container.appendChild(card);
+  }
+
+  /**
+   * 显示空状态
+   */
+  showEmpty() {
+    if (!this.container) return;
+
+    const emptyDiv = document.createElement('div');
+    emptyDiv.className = 'frf_empty';
+    emptyDiv.innerHTML = `
+      <div class="frf_empty_content">
+        <p>暂无好友评测此游戏</p>
+      </div>
+    `;
+
+    this.container.appendChild(emptyDiv);
+  }
+
+  /**
+   * 显示错误状态
+   * @param {string} message - 错误消息
+   */
+  showError(message) {
+    if (!this.container) return;
+
+    this.hideLoading();
+    this.clear();
+
+    const errorDiv = document.createElement('div');
+    errorDiv.className = 'frf_error';
+    errorDiv.innerHTML = `
+      <div class="frf_error_content">
+        <p>加载失败：${message}</p>
+        <button class="frf_retry_btn" onclick="window.FRF && window.FRF.renderUI()">重试</button>
+      </div>
+    `;
+
+    this.container.appendChild(errorDiv);
+  }
+
+  /**
+   * 添加刷新按钮到页面（在"关于评测"按钮右边）
+   */
+  addRefreshButton() {
+    // 检查是否已存在
+    if (document.querySelector('.frf_refresh_btn')) return;
+
+    // 找到"关于评测"按钮所在的 .learnMore 容器
+    const learnMore = document.querySelector('.apphub_SectionFilter .learnMore');
+    if (learnMore) {
+      const btn = document.createElement('div');
+      btn.className = 'frf_refresh_btn';
+      btn.style.cssText = 'display: inline-block; margin-left: 10px;';
+      btn.innerHTML = `
+        <a class="btnv6_blue_hoverfade btn_small_thin">
+          <span>FRF 刷新</span>
+        </a>
+      `;
+
+      btn.addEventListener('click', () => {
+        if (window.FRF && window.FRF.renderUI) {
+          window.FRF.renderUI(true); // force refresh
+        }
+      });
+
+      // 插入到"关于评测"按钮后面
+      learnMore.parentNode.insertBefore(btn, learnMore.nextSibling);
+      return;
+    }
+
+    // 备选：添加到筛选区域末尾
+    const filterArea = document.querySelector('.apphub_SectionFilter');
+    if (filterArea) {
+      const btn = document.createElement('div');
+      btn.className = 'frf_refresh_btn';
+      btn.style.cssText = 'display: inline-block; float: right; margin-right: 10px;';
+      btn.innerHTML = `
+        <a class="btnv6_blue_hoverfade btn_small_thin">
+          <span>FRF 刷新</span>
+        </a>
+      `;
+
+      btn.addEventListener('click', () => {
+        if (window.FRF && window.FRF.renderUI) {
+          window.FRF.renderUI(true); // force refresh
+        }
+      });
+
+      filterArea.appendChild(btn);
+    }
+  }
+
+  /**
+   * 安全截断HTML内容，避免破坏标签结构
+   * @param {string} html - HTML内容
+   * @param {number} maxLength - 最大纯文本长度
+   * @returns {string} 截断后的HTML
+   */
+  safeHTMLTruncate(html, maxLength) {
+    if (!html) return '';
+
+    // 先统计纯文本长度（不含HTML标签）
+    const textContent = html.replace(/<[^>]*>/g, '');
+    if (textContent.length <= maxLength) {
+      return html;
+    }
+
+    // 需要截断：逐字符遍历，跟踪标签状态
+    let result = '';
+    let textCount = 0;
+    let inTag = false;
+    let currentTag = '';
+    const openTags = []; // 记录打开的标签
+
+    for (let i = 0; i < html.length && textCount < maxLength; i++) {
+      const char = html[i];
+
+      if (char === '<') {
+        inTag = true;
+        currentTag = '<';
+      } else if (char === '>') {
+        inTag = false;
+        currentTag += '>';
+        result += currentTag;
+
+        // 解析标签名
+        const tagMatch = currentTag.match(/^<\/?([a-zA-Z]+)/);
+        if (tagMatch) {
+          const tagName = tagMatch[1].toLowerCase();
+          if (currentTag.startsWith('</')) {
+            // 闭合标签：从栈中移除
+            const idx = openTags.lastIndexOf(tagName);
+            if (idx !== -1) openTags.splice(idx, 1);
+          } else if (!currentTag.endsWith('/>') && !['br', 'hr', 'img'].includes(tagName)) {
+            // 开始标签（非自闭合）：加入栈
+            openTags.push(tagName);
+          }
+        }
+        currentTag = '';
+        continue;
+      } else if (inTag) {
+        currentTag += char;
+      } else {
+        // 普通文本字符
+        result += char;
+        textCount++;
+      }
+    }
+
+    // 添加省略号
+    result += '...';
+
+    // 闭合所有未闭合的标签（逆序）
+    for (let i = openTags.length - 1; i >= 0; i--) {
+      result += `</${openTags[i]}>`;
+    }
+
+    return result;
+  }
+
+  /**
+   * 注入自定义样式
+   */
+  injectStyles() {
+    if (document.querySelector('#frf_styles')) return;
+
+    const style = document.createElement('style');
+    style.id = 'frf_styles';
+    style.textContent = `
+      /* FRF 修复提示 - 与加载状态完全一致的样式 */
+      .frf_fixing_notice {
+        padding: 40px;
+        text-align: center;
+        color: #8f98a0;
+      }
+
+      .frf_notice_content {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+      }
+
+      .frf_notice_text {
+        font-size: 14px;
+        color: #8f98a0;
+      }
+
+      /* FRF 加载状态 */
+      .frf_loading {
+        padding: 40px;
+        text-align: center;
+        color: #8f98a0;
+      }
+
+      .frf_loading_content {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+      }
+
+      .frf_loading_text {
+        font-size: 14px;
+      }
+
+      /* FRF 空状态 */
+      .frf_empty {
+        padding: 40px;
+        text-align: center;
+        color: #8f98a0;
+      }
+
+      /* FRF 错误状态 */
+      .frf_error {
+        padding: 40px;
+        text-align: center;
+        color: #c75050;
+      }
+
+      .frf_retry_btn {
+        margin-top: 10px;
+        padding: 8px 16px;
+        background: #67c1f5;
+        border: none;
+        border-radius: 2px;
+        color: #fff;
+        cursor: pointer;
+      }
+
+      .frf_retry_btn:hover {
+        background: #4eb4f1;
+      }
+
+      /* FRF 刷新按钮 */
+      .frf_refresh_btn {
+        display: inline-block;
+        cursor: pointer;
+      }
+
+      /* ========== FRF 卡片样式 - 完全自定义 ========== */
+
+      /* 容器 */
+      .frf_container {
+        clear: both;
+        max-width: 940px;
+        margin: 0 auto;
+      }
+
+      /* 单个卡片 */
+      .frf_card {
+        background: rgba(0, 0, 0, 0.3);
+        margin-bottom: 26px;
+        cursor: pointer;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+      }
+
+      .frf_card:hover {
+        background: rgba(0, 0, 0, 0.25);
+      }
+
+      /* 卡片内部容器 */
+      .frf_card_inner {
+        padding: 0;
+      }
+
+      /* 有价值人数行 */
+      .frf_helpful_row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 14px;
+        font-size: 12px;
+        color: #8f98a0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      }
+
+      .frf_helpful_text {
+        color: #8f98a0;
+      }
+
+      .frf_award {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        color: #67c1f5;
+      }
+
+      .frf_award_icon {
+        width: 16px;
+        height: 16px;
+      }
+
+      /* 推荐区域 */
+      .frf_recommend_row {
+        display: flex;
+        align-items: center;
+        padding: 12px 14px;
+        gap: 12px;
+      }
+
+      .frf_thumb_icon {
+        width: 40px;
+        height: 40px;
+        flex-shrink: 0;
+      }
+
+      .frf_recommend_info {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .frf_recommend_title {
+        font-size: 17px;
+        font-weight: normal;
+        color: #c6d4df;
+      }
+
+      .frf_recommend_hours {
+        font-size: 13px;
+        color: #8f98a0;
+      }
+
+      /* 发布日期 */
+      .frf_date_row {
+        padding: 0 14px 8px 14px;
+        font-size: 12px;
+        color: #8f98a0;
+      }
+
+      /* 评测内容 */
+      .frf_content_row {
+        padding: 0 14px 14px 14px;
+        font-size: 13px;
+        line-height: 1.6;
+        color: #acb2b8;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
+      }
+
+      /* 底部用户信息栏 */
+      .frf_author_row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 14px;
+        background: rgba(0, 0, 0, 0.2);
+        border-top: 1px solid rgba(255, 255, 255, 0.05);
+      }
+
+      .frf_author_left {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-shrink: 0;
+      }
+
+      .frf_avatar_link {
+        display: block;
+        width: 32px;
+        height: 32px;
+        flex-shrink: 0;
+        text-align: left;
+      }
+
+      .frf_avatar_img {
+        width: 32px;
+        height: 32px;
+        display: block;
+        margin: 0;
+        object-fit: cover;
+      }
+
+      .frf_author_info {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .frf_author_name {
+        font-size: 13px;
+        color: #c6d4df;
+        text-decoration: none;
+      }
+
+      .frf_author_name:hover {
+        color: #67c1f5;
+      }
+
+      .frf_author_tag {
+        font-size: 11px;
+        color: #8f98a0;
+      }
+
+      .frf_comment_area {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        color: #8f98a0;
+        font-size: 13px;
+      }
+
+      .frf_comment_icon {
+        font-size: 14px;
+      }
+
+      .frf_comment_count {
+        font-size: 13px;
+      }
+    `;
+
+    document.head.appendChild(style);
+  }
+}
+
+// 暴露到全局
+if (typeof window !== 'undefined') {
+  window.FRF_UIRenderer = UIRenderer;
+}
