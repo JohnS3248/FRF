@@ -12,15 +12,16 @@ const MODE = process.argv.includes('--production') ? 'production' : 'development
 
 console.log(`\n📦 开始构建 (${MODE} 模式)...\n`);
 
-// 文件加载顺序（重要！）- 新架构
+// 文件加载顺序（重要！）- v3.0 双模式架构
 const SOURCE_FILES = [
   'src/utils/constants.js',
   'src/utils/logger.js',
   'src/utils/validator.js',
   'src/core/ReviewExtractor.js',
   'src/core/ReviewListExtractor.js',
-  'src/core/SmartThrottler.js',       // 智能限流器
-  'src/core/ReviewCache.js',
+  'src/core/SmartThrottler.js',       // 限流器（字典模式）
+  'src/core/ReviewCache.js',          // 字典缓存
+  'src/core/QuickSearcher.js',        // 快速搜索（v3.0 新增）
   'src/core/SteamAPI.js',
   'src/main.js'
 ];
@@ -51,19 +52,24 @@ if (MODE === 'development') {
 
   const devCode = `
 /**
- * FRF v2.0 - 开发测试版本
- * 全新字典缓存架构
+ * FRF v3.0 - 开发测试版本
+ * 双模式架构：快速模式 + 字典模式
  *
  * 使用方法：
  * 1. 访问 https://steamcommunity.com/
  * 2. 打开浏览器控制台（F12）
  * 3. 复制粘贴此文件全部内容并回车
- * 4. 运行 FRF.test(appId) 开始测试
+ * 4. 运行 FRF.quick(appId) 或 FRF.test(appId)
  *
- * 快速命令：
- * - FRF.test(413150)   测试星露谷物语
- * - FRF.help()         查看帮助
+ * 快速模式（推荐）：
+ * - FRF.quick(413150)  快速搜索星露谷物语
+ * - FRF.pause()        暂停搜索
+ * - FRF.resume()       继续搜索
+ *
+ * 字典模式：
+ * - FRF.test(413150)   字典模式查询
  * - FRF.stats()        查看缓存统计
+ * - FRF.help()         查看帮助
  */
 
 (function() {

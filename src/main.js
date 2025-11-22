@@ -1,8 +1,10 @@
 /**
- * FRF - Friend Review Finder
- * 主程序 - 新架构
+ * FRF - Friend Review Finder v3.0
+ * 主程序
  *
- * 使用字典缓存优化的查询流程
+ * 双模式架构：
+ * - 快速模式：单游戏搜索，遍历好友，获取最新数据
+ * - 字典模式：构建缓存字典，多游戏快速查询
  */
 
 class FriendReviewFinder {
@@ -22,8 +24,8 @@ class FriendReviewFinder {
    */
   async fetchReviews() {
     this.logger.info('========================================');
-    this.logger.info('  FRF - Friend Review Finder v2.0');
-    this.logger.info('  使用字典缓存优化架构');
+    this.logger.info('  FRF - Friend Review Finder v3.0');
+    this.logger.info('  字典模式 - 多游戏快速查询');
     this.logger.info('========================================');
 
     try {
@@ -237,40 +239,123 @@ if (typeof window !== 'undefined') {
     },
 
     /**
+     * 快速模式 - 单游戏搜索（v3.0 新增）
+     */
+    // 快速模式配置（已优化：基于实测数据）
+    _quickConfig: {
+      batchSize: 30,
+      delay: 0,
+      debug: false
+    },
+
+    /**
+     * 设置快速模式参数
+     * @param {Object} config - { batchSize, delay, debug }
+     */
+    setQuickConfig: function(config) {
+      if (config.batchSize !== undefined) this._quickConfig.batchSize = config.batchSize;
+      if (config.delay !== undefined) this._quickConfig.delay = config.delay;
+      if (config.debug !== undefined) this._quickConfig.debug = config.debug;
+      console.log('⚙️ 快速模式配置已更新:', this._quickConfig);
+    },
+
+    quick: async function(appId, options = {}) {
+      console.log('%c========================================', 'color: #ff9800; font-weight: bold;');
+      console.log(`%c  🚀 快速模式 - 游戏 ${appId}`, 'color: #ff9800; font-weight: bold; font-size: 14px;');
+      console.log('%c========================================', 'color: #ff9800; font-weight: bold;');
+      console.log('');
+
+      const searcher = new QuickSearcher(appId);
+      // 应用配置
+      searcher.batchSize = this._quickConfig.batchSize;
+      searcher.delay = this._quickConfig.delay;
+      searcher.debugMode = this._quickConfig.debug;
+
+      console.log(`⚙️ 配置: batch=${searcher.batchSize}, delay=${searcher.delay}ms, debug=${searcher.debugMode}`);
+      console.log('');
+
+      window.frfQuickSearcher = searcher; // 保存实例以支持暂停/继续
+      await searcher.search({
+        onProgress: options.onProgress || ((current, total, found, eta) => {
+          if (current % 9 === 0 || current === total) {
+            console.log(`📊 进度: ${current}/${total}, 已找到: ${found} 篇, 预计剩余: ${eta}`);
+          }
+        }),
+        onComplete: options.onComplete || ((reviews) => {
+          console.log(`✅ 搜索完成！找到 ${reviews.length} 篇评测`);
+        }),
+        onPause: options.onPause
+      });
+
+      return searcher;
+    },
+
+    /**
+     * 暂停快速搜索
+     */
+    pause: function() {
+      if (window.frfQuickSearcher) {
+        window.frfQuickSearcher.pause();
+        console.log('⏸️ 搜索已暂停');
+      } else {
+        console.log('❌ 没有正在进行的搜索');
+      }
+    },
+
+    /**
+     * 继续快速搜索
+     */
+    resume: async function() {
+      if (window.frfQuickSearcher) {
+        await window.frfQuickSearcher.resume();
+      } else {
+        console.log('❌ 没有可继续的搜索');
+      }
+    },
+
+    /**
      * 显示帮助
      */
     help: function() {
       console.log('%c========================================', 'color: #47bfff; font-weight: bold;');
-      console.log('%c  📖 FRF 使用指南', 'color: #47bfff; font-weight: bold; font-size: 16px;');
+      console.log('%c  📖 FRF v3.0 使用指南', 'color: #47bfff; font-weight: bold; font-size: 16px;');
       console.log('%c========================================', 'color: #47bfff; font-weight: bold;');
       console.log('');
-      console.log('🎯 基本命令:');
-      console.log('  FRF.test(appId)      - 测试指定游戏');
-      console.log('  FRF.getAppId()       - 获取当前页面游戏ID');
+      console.log('%c🚀 快速模式（推荐）:', 'color: #ff9800; font-weight: bold;');
+      console.log('  FRF.quick(appId)     - 单游戏快速搜索');
+      console.log('  FRF.pause()          - 暂停搜索');
+      console.log('  FRF.resume()         - 继续搜索');
       console.log('');
-      console.log('🔧 缓存管理:');
-      console.log('  FRF.refresh()        - 刷新缓存');
+      console.log('%c📚 字典模式:', 'color: #4caf50; font-weight: bold;');
+      console.log('  FRF.test(appId)      - 字典模式查询');
+      console.log('  FRF.refresh()        - 刷新字典缓存');
       console.log('  FRF.clearCache()     - 清除缓存');
       console.log('  FRF.stats()          - 查看缓存统计');
       console.log('');
-      console.log('⚙️ 高级选项:');
+      console.log('%c⚙️ 其他:', 'color: #9e9e9e;');
+      console.log('  FRF.getAppId()       - 获取当前页面游戏ID');
       console.log('  FRF.setDebug(true)   - 开启调试模式');
-      console.log('  FRF.help()           - 显示此帮助');
       console.log('');
-      console.log('💡 示例:');
-      console.log('  FRF.test(413150)     - 测试《星露谷物语》');
+      console.log('%c💡 模式对比:', 'color: #2196f3;');
+      console.log('  快速模式: 单游戏，最新数据，遍历好友');
+      console.log('  字典模式: 多游戏，缓存查询，需先构建');
+      console.log('');
+      console.log('%c💡 示例:', 'color: #2196f3;');
+      console.log('  FRF.quick(413150)    - 快速搜索《星露谷物语》');
+      console.log('  FRF.test(413150)     - 字典模式查询《星露谷物语》');
       console.log('');
     }
   };
 
   // 欢迎信息
   console.log('%c========================================', 'color: #47bfff; font-weight: bold;');
-  console.log('%c  🚀 FRF v2.0 已加载', 'color: #47bfff; font-weight: bold; font-size: 16px;');
+  console.log('%c  🚀 FRF v3.0 已加载', 'color: #47bfff; font-weight: bold; font-size: 16px;');
   console.log('%c  Friend Review Finder', 'color: #47bfff;');
-  console.log('%c  全新字典缓存架构', 'color: #4caf50; font-weight: bold;');
+  console.log('%c  双模式架构：快速模式 + 字典模式', 'color: #4caf50; font-weight: bold;');
   console.log('%c========================================', 'color: #47bfff; font-weight: bold;');
   console.log('');
   console.log('📖 输入 %cFRF.help()%c 查看使用说明', 'color: #ff9800; font-weight: bold;', '');
-  console.log('🎯 快速开始: %cFRF.test(appId)%c', 'color: #ff9800; font-weight: bold;', '');
+  console.log('🚀 快速模式: %cFRF.quick(appId)%c - 单游戏最新数据', 'color: #ff9800; font-weight: bold;', '');
+  console.log('📚 字典模式: %cFRF.test(appId)%c - 多游戏快速查询', 'color: #4caf50; font-weight: bold;', '');
   console.log('');
 }

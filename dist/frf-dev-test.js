@@ -1,18 +1,23 @@
 
 /**
- * FRF v2.0 - 开发测试版本
- * 全新字典缓存架构
+ * FRF v3.0 - 开发测试版本
+ * 双模式架构：快速模式 + 字典模式
  *
  * 使用方法：
  * 1. 访问 https://steamcommunity.com/
  * 2. 打开浏览器控制台（F12）
  * 3. 复制粘贴此文件全部内容并回车
- * 4. 运行 FRF.test(appId) 开始测试
+ * 4. 运行 FRF.quick(appId) 或 FRF.test(appId)
  *
- * 快速命令：
- * - FRF.test(413150)   测试星露谷物语
- * - FRF.help()         查看帮助
+ * 快速模式（推荐）：
+ * - FRF.quick(413150)  快速搜索星露谷物语
+ * - FRF.pause()        暂停搜索
+ * - FRF.resume()       继续搜索
+ *
+ * 字典模式：
+ * - FRF.test(413150)   字典模式查询
  * - FRF.stats()        查看缓存统计
+ * - FRF.help()         查看帮助
  */
 
 (function() {
@@ -826,6 +831,429 @@ if (typeof window !== 'undefined') {
 }
 
 
+// ==================== src/core/QuickSearcher.js ====================
+
+/**
+ * 快速搜索器 - v3.0 快速模式核心模块
+ *
+ * 算法逻辑：
+ * 1. 获取好友列表
+ * 2. 遍历每个好友，请求 /profiles/{steamId}/recommended/{appId}/
+ * 3. 检查最终 URL 判断是否有评测
+ *    - URL 包含 appId = 有评测 → 提取数据
+ *    - URL 被重定向 = 没评测 → 返回 null
+ * 4. 收集所有有效评测
+ *
+ * 优化参数（基于实测）：
+ * - batchSize=30：最优并发数
+ * - delay=0：无延迟最快
+ * - 229 好友约 42 秒完成
+ */
+
+class QuickSearcher {
+  constructor(appId) {
+    this.appId = String(appId);
+    this.logger = new Logger('QuickSearcher');
+    this.extractor = new ReviewExtractor();
+
+    // 配置参数（已优化：基于实测数据）
+    this.batchSize = 30;        // 每批并发数（测试最优值）
+    this.delay = 0;             // 批次间延迟（ms）（无延迟最快）
+    this.debugMode = false;     // 调试模式
+
+    // 状态
+    this.isPaused = false;
+    this.isRunning = false;
+    this.reviews = [];
+    this.friendIds = [];
+    this.currentIndex = 0;
+    this.startTime = 0;
+
+    // 回调
+    this.onProgress = null;
+    this.onComplete = null;
+    this.onPause = null;
+  }
+
+  /**
+   * 开始快速搜索
+   * @param {Object} options - 配置选项
+   * @param {Function} options.onProgress - 进度回调 (current, total, found, eta)
+   * @param {Function} options.onComplete - 完成回调 (reviews)
+   * @param {Function} options.onPause - 暂停回调 (current, total)
+   * @returns {Promise<Array>} 评测数据数组
+   */
+  async search(options = {}) {
+    this.onProgress = options.onProgress || null;
+    this.onComplete = options.onComplete || null;
+    this.onPause = options.onPause || null;
+
+    this.logger.info('========================================');
+    this.logger.info('  🚀 快速模式 - 单游戏搜索');
+    this.logger.info(`  🎮 目标游戏: ${this.appId}`);
+    this.logger.info('========================================');
+    this.logger.info('');
+
+    try {
+      // 1. 获取好友列表
+      this.logger.info('📋 正在获取好友列表...');
+      this.friendIds = await this.fetchFriendIds();
+      this.logger.info(`✅ 获取到 ${this.friendIds.length} 个好友`);
+      this.logger.info('');
+
+      // 2. 开始搜索
+      this.logger.info(`🔍 开始搜索好友评测...`);
+      this.logger.info(`⚙️ 配置: 批次=${this.batchSize}, 延迟=${this.delay}ms`);
+      this.logger.info('');
+
+      this.isRunning = true;
+      this.isPaused = false;
+      this.startTime = Date.now();
+      this.reviews = [];
+      this.currentIndex = 0;
+
+      await this.processAllFriends();
+
+      // 3. 输出结果
+      this.logger.info('');
+      this.logger.info('========================================');
+      this.logger.info('  ✅ 搜索完成！');
+      this.logger.info('========================================');
+      this.showResults();
+
+      if (this.onComplete) {
+        this.onComplete(this.reviews);
+      }
+
+      return this.reviews;
+
+    } catch (error) {
+      this.logger.error('搜索失败', error);
+      throw error;
+    } finally {
+      this.isRunning = false;
+    }
+  }
+
+  /**
+   * 获取好友列表
+   */
+  async fetchFriendIds() {
+    const response = await fetch('/my/friends/', { credentials: 'include' });
+    if (!response.ok) {
+      throw new Error(`获取好友列表失败: HTTP ${response.status}`);
+    }
+
+    const html = await response.text();
+    const regex = /data-steamid="(\d+)"/g;
+    const matches = [...html.matchAll(regex)];
+    return [...new Set(matches.map(m => m[1]))];
+  }
+
+  /**
+   * 处理所有好友
+   */
+  async processAllFriends() {
+    const total = this.friendIds.length;
+
+    while (this.currentIndex < total) {
+      // 检查是否暂停
+      if (this.isPaused) {
+        this.logger.info(`⏸️ 已暂停 (${this.currentIndex}/${total})`);
+        if (this.onPause) {
+          this.onPause(this.currentIndex, total);
+        }
+        return;
+      }
+
+      // 获取当前批次
+      const batch = this.friendIds.slice(
+        this.currentIndex,
+        Math.min(this.currentIndex + this.batchSize, total)
+      );
+
+      // 并发处理当前批次
+      const promises = batch.map(steamId => this.checkFriendReview(steamId));
+      const results = await Promise.all(promises);
+
+      // 收集有效结果
+      const validReviews = results.filter(r => r !== null);
+      this.reviews.push(...validReviews);
+
+      // 更新进度
+      this.currentIndex += batch.length;
+
+      // 计算 ETA
+      const elapsed = Date.now() - this.startTime;
+      const avgPerFriend = elapsed / this.currentIndex;
+      const remaining = (total - this.currentIndex) * avgPerFriend;
+      const eta = this.formatTime(remaining);
+
+      // 进度回调
+      if (this.onProgress) {
+        this.onProgress(this.currentIndex, total, this.reviews.length, eta);
+      }
+
+      // 每 9 个好友显示一次进度
+      if (this.currentIndex % 9 === 0 || this.currentIndex === total) {
+        this.logger.info(
+          `📊 进度: ${this.currentIndex}/${total}, ` +
+          `已找到: ${this.reviews.length} 篇, ` +
+          `预计剩余: ${eta}`
+        );
+      }
+
+      // 批次延迟
+      if (this.currentIndex < total && !this.isPaused) {
+        await this.sleep(this.delay);
+      }
+    }
+  }
+
+  /**
+   * 检查单个好友是否有目标游戏的评测
+   * 通过 URL 重定向检测：有评测则停留在原 URL，无评测则重定向到 /recommended/
+   *
+   * @param {string} steamId - 好友 Steam ID
+   * @returns {Promise<Object|null>} 评测数据或 null
+   */
+  async checkFriendReview(steamId) {
+    const url = `https://steamcommunity.com/profiles/${steamId}/recommended/${this.appId}/`;
+    const startTime = Date.now();
+
+    try {
+      const response = await fetch(url, {
+        credentials: 'include',
+        redirect: 'follow'
+      });
+
+      const elapsed = Date.now() - startTime;
+
+      if (!response.ok) {
+        if (this.debugMode) {
+          console.log(`[DEBUG] ${steamId} | not ok | ${elapsed}ms`);
+        }
+        return null;
+      }
+
+      // 检查最终 URL 是否包含 appId（未被重定向 = 有评测）
+      const finalUrl = response.url;
+      const hasReview = finalUrl.includes(`/recommended/${this.appId}`);
+
+      if (this.debugMode) {
+        console.log(`[DEBUG] ${steamId} | hasReview=${hasReview} | ${elapsed}ms`);
+      }
+
+      if (!hasReview) {
+        return null;
+      }
+
+      // 有评测，提取数据
+      const html = await response.text();
+      return this.extractReviewData(html, steamId);
+
+    } catch (error) {
+      if (this.debugMode) {
+        console.log(`[DEBUG] ${steamId} | error: ${error.message}`);
+      }
+      return null;
+    }
+  }
+
+  /**
+   * 从 HTML 提取评测数据
+   */
+  extractReviewData(html, steamId) {
+    return {
+      steamId,
+      appId: this.appId,
+      url: `https://steamcommunity.com/profiles/${steamId}/recommended/${this.appId}/`,
+      isPositive: this.extractRecommendation(html),
+      totalHours: this.extractTotalHours(html),
+      publishDate: this.extractPublishDate(html),
+      updateDate: this.extractUpdateDate(html)
+    };
+  }
+
+  /**
+   * 提取推荐状态
+   */
+  extractRecommendation(html) {
+    const positiveIndicators = [
+      'icon_thumbsUp.png',
+      'ratingSummary">推荐',
+      'ratingSummary">Recommended'
+    ];
+    return positiveIndicators.some(indicator => html.includes(indicator));
+  }
+
+  /**
+   * 提取游戏时长
+   */
+  extractTotalHours(html) {
+    const patterns = [
+      /总时数\s*([\d,]+(?:\.\d+)?)\s*小时/,
+      /([\d,]+(?:\.\d+)?)\s*hrs?\s+on\s+record/i
+    ];
+
+    for (const pattern of patterns) {
+      const match = html.match(pattern);
+      if (match) {
+        return match[1].replace(/,/g, '');
+      }
+    }
+    return '未知';
+  }
+
+  /**
+   * 提取发布时间
+   */
+  extractPublishDate(html) {
+    const patterns = [
+      /发布于[：:]\s*([^<\r\n]+)/,
+      /Posted[：:]\s*([^<\r\n]+)/i
+    ];
+
+    for (const pattern of patterns) {
+      const match = html.match(pattern);
+      if (match) {
+        return match[1].trim();
+      }
+    }
+    return '未知';
+  }
+
+  /**
+   * 提取更新时间
+   */
+  extractUpdateDate(html) {
+    // 带年份
+    const withYearPatterns = [
+      /更新于[：:]\s*(\d{4}\s*年[^<\r\n]+)/,
+      /Updated[：:]\s*([A-Za-z]+\s+\d+,\s*\d{4}[^<\r\n]+)/i
+    ];
+
+    for (const pattern of withYearPatterns) {
+      const match = html.match(pattern);
+      if (match) {
+        return match[1].trim();
+      }
+    }
+
+    // 不带年份
+    const withoutYearPatterns = [
+      /更新于[：:]\s*(\d{1,2}\s*月\s*\d{1,2}\s*日[^<\r\n]*?)(?:<|$)/,
+      /Updated[：:]\s*([A-Za-z]+\s+\d{1,2}[^<\r\n]*?)(?:<|$)/i
+    ];
+
+    for (const pattern of withoutYearPatterns) {
+      const match = html.match(pattern);
+      if (match) {
+        const year = new Date().getFullYear();
+        return `${match[1].trim()} (${year})`;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * 显示结果统计
+   */
+  showResults() {
+    const positive = this.reviews.filter(r => r.isPositive).length;
+    const negative = this.reviews.length - positive;
+    const elapsed = this.formatTime(Date.now() - this.startTime);
+
+    this.logger.info(`📊 检查了 ${this.friendIds.length} 个好友`);
+    this.logger.info(`📊 找到 ${this.reviews.length} 篇评测`);
+    this.logger.info(`   👍 推荐: ${positive} 篇`);
+    this.logger.info(`   👎 不推荐: ${negative} 篇`);
+    this.logger.info(`⏱️ 总耗时: ${elapsed}`);
+    this.logger.info('');
+
+    // 保存到全局
+    window.frfQuickReviews = this.reviews;
+    this.logger.info('💾 评测数据已保存到 window.frfQuickReviews');
+  }
+
+  /**
+   * 暂停搜索
+   */
+  pause() {
+    if (this.isRunning && !this.isPaused) {
+      this.isPaused = true;
+      this.logger.info('⏸️ 正在暂停...');
+    }
+  }
+
+  /**
+   * 继续搜索
+   */
+  async resume() {
+    if (this.isPaused && this.currentIndex < this.friendIds.length) {
+      this.isPaused = false;
+      this.isRunning = true;
+      this.logger.info('▶️ 继续搜索...');
+
+      await this.processAllFriends();
+
+      if (!this.isPaused) {
+        this.logger.info('');
+        this.logger.info('========================================');
+        this.logger.info('  ✅ 搜索完成！');
+        this.logger.info('========================================');
+        this.showResults();
+
+        if (this.onComplete) {
+          this.onComplete(this.reviews);
+        }
+      }
+    }
+  }
+
+  /**
+   * 获取当前状态
+   */
+  getStatus() {
+    return {
+      isRunning: this.isRunning,
+      isPaused: this.isPaused,
+      currentIndex: this.currentIndex,
+      totalFriends: this.friendIds.length,
+      foundReviews: this.reviews.length,
+      progress: this.friendIds.length > 0
+        ? ((this.currentIndex / this.friendIds.length) * 100).toFixed(1)
+        : 0
+    };
+  }
+
+  /**
+   * 格式化时间
+   */
+  formatTime(ms) {
+    if (ms < 1000) return '< 1 秒';
+    const seconds = Math.floor(ms / 1000);
+    if (seconds < 60) return `${seconds} 秒`;
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes} 分 ${remainingSeconds} 秒`;
+  }
+
+  /**
+   * 睡眠
+   */
+  sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+}
+
+// 暴露到全局
+if (typeof window !== 'undefined') {
+  window.FRF_QuickSearcher = QuickSearcher;
+}
+
+
 // ==================== src/core/SteamAPI.js ====================
 
 /**
@@ -984,10 +1412,12 @@ if (typeof window !== 'undefined') {
 // ==================== src/main.js ====================
 
 /**
- * FRF - Friend Review Finder
- * 主程序 - 新架构
+ * FRF - Friend Review Finder v3.0
+ * 主程序
  *
- * 使用字典缓存优化的查询流程
+ * 双模式架构：
+ * - 快速模式：单游戏搜索，遍历好友，获取最新数据
+ * - 字典模式：构建缓存字典，多游戏快速查询
  */
 
 class FriendReviewFinder {
@@ -1007,8 +1437,8 @@ class FriendReviewFinder {
    */
   async fetchReviews() {
     this.logger.info('========================================');
-    this.logger.info('  FRF - Friend Review Finder v2.0');
-    this.logger.info('  使用字典缓存优化架构');
+    this.logger.info('  FRF - Friend Review Finder v3.0');
+    this.logger.info('  字典模式 - 多游戏快速查询');
     this.logger.info('========================================');
 
     try {
@@ -1222,41 +1652,124 @@ if (typeof window !== 'undefined') {
     },
 
     /**
+     * 快速模式 - 单游戏搜索（v3.0 新增）
+     */
+    // 快速模式配置（已优化：基于实测数据）
+    _quickConfig: {
+      batchSize: 30,
+      delay: 0,
+      debug: false
+    },
+
+    /**
+     * 设置快速模式参数
+     * @param {Object} config - { batchSize, delay, debug }
+     */
+    setQuickConfig: function(config) {
+      if (config.batchSize !== undefined) this._quickConfig.batchSize = config.batchSize;
+      if (config.delay !== undefined) this._quickConfig.delay = config.delay;
+      if (config.debug !== undefined) this._quickConfig.debug = config.debug;
+      console.log('⚙️ 快速模式配置已更新:', this._quickConfig);
+    },
+
+    quick: async function(appId, options = {}) {
+      console.log('%c========================================', 'color: #ff9800; font-weight: bold;');
+      console.log(`%c  🚀 快速模式 - 游戏 ${appId}`, 'color: #ff9800; font-weight: bold; font-size: 14px;');
+      console.log('%c========================================', 'color: #ff9800; font-weight: bold;');
+      console.log('');
+
+      const searcher = new QuickSearcher(appId);
+      // 应用配置
+      searcher.batchSize = this._quickConfig.batchSize;
+      searcher.delay = this._quickConfig.delay;
+      searcher.debugMode = this._quickConfig.debug;
+
+      console.log(`⚙️ 配置: batch=${searcher.batchSize}, delay=${searcher.delay}ms, debug=${searcher.debugMode}`);
+      console.log('');
+
+      window.frfQuickSearcher = searcher; // 保存实例以支持暂停/继续
+      await searcher.search({
+        onProgress: options.onProgress || ((current, total, found, eta) => {
+          if (current % 9 === 0 || current === total) {
+            console.log(`📊 进度: ${current}/${total}, 已找到: ${found} 篇, 预计剩余: ${eta}`);
+          }
+        }),
+        onComplete: options.onComplete || ((reviews) => {
+          console.log(`✅ 搜索完成！找到 ${reviews.length} 篇评测`);
+        }),
+        onPause: options.onPause
+      });
+
+      return searcher;
+    },
+
+    /**
+     * 暂停快速搜索
+     */
+    pause: function() {
+      if (window.frfQuickSearcher) {
+        window.frfQuickSearcher.pause();
+        console.log('⏸️ 搜索已暂停');
+      } else {
+        console.log('❌ 没有正在进行的搜索');
+      }
+    },
+
+    /**
+     * 继续快速搜索
+     */
+    resume: async function() {
+      if (window.frfQuickSearcher) {
+        await window.frfQuickSearcher.resume();
+      } else {
+        console.log('❌ 没有可继续的搜索');
+      }
+    },
+
+    /**
      * 显示帮助
      */
     help: function() {
       console.log('%c========================================', 'color: #47bfff; font-weight: bold;');
-      console.log('%c  📖 FRF 使用指南', 'color: #47bfff; font-weight: bold; font-size: 16px;');
+      console.log('%c  📖 FRF v3.0 使用指南', 'color: #47bfff; font-weight: bold; font-size: 16px;');
       console.log('%c========================================', 'color: #47bfff; font-weight: bold;');
       console.log('');
-      console.log('🎯 基本命令:');
-      console.log('  FRF.test(appId)      - 测试指定游戏');
-      console.log('  FRF.getAppId()       - 获取当前页面游戏ID');
+      console.log('%c🚀 快速模式（推荐）:', 'color: #ff9800; font-weight: bold;');
+      console.log('  FRF.quick(appId)     - 单游戏快速搜索');
+      console.log('  FRF.pause()          - 暂停搜索');
+      console.log('  FRF.resume()         - 继续搜索');
       console.log('');
-      console.log('🔧 缓存管理:');
-      console.log('  FRF.refresh()        - 刷新缓存');
+      console.log('%c📚 字典模式:', 'color: #4caf50; font-weight: bold;');
+      console.log('  FRF.test(appId)      - 字典模式查询');
+      console.log('  FRF.refresh()        - 刷新字典缓存');
       console.log('  FRF.clearCache()     - 清除缓存');
       console.log('  FRF.stats()          - 查看缓存统计');
       console.log('');
-      console.log('⚙️ 高级选项:');
+      console.log('%c⚙️ 其他:', 'color: #9e9e9e;');
+      console.log('  FRF.getAppId()       - 获取当前页面游戏ID');
       console.log('  FRF.setDebug(true)   - 开启调试模式');
-      console.log('  FRF.help()           - 显示此帮助');
       console.log('');
-      console.log('💡 示例:');
-      console.log('  FRF.test(413150)     - 测试《星露谷物语》');
+      console.log('%c💡 模式对比:', 'color: #2196f3;');
+      console.log('  快速模式: 单游戏，最新数据，遍历好友');
+      console.log('  字典模式: 多游戏，缓存查询，需先构建');
+      console.log('');
+      console.log('%c💡 示例:', 'color: #2196f3;');
+      console.log('  FRF.quick(413150)    - 快速搜索《星露谷物语》');
+      console.log('  FRF.test(413150)     - 字典模式查询《星露谷物语》');
       console.log('');
     }
   };
 
   // 欢迎信息
   console.log('%c========================================', 'color: #47bfff; font-weight: bold;');
-  console.log('%c  🚀 FRF v2.0 已加载', 'color: #47bfff; font-weight: bold; font-size: 16px;');
+  console.log('%c  🚀 FRF v3.0 已加载', 'color: #47bfff; font-weight: bold; font-size: 16px;');
   console.log('%c  Friend Review Finder', 'color: #47bfff;');
-  console.log('%c  全新字典缓存架构', 'color: #4caf50; font-weight: bold;');
+  console.log('%c  双模式架构：快速模式 + 字典模式', 'color: #4caf50; font-weight: bold;');
   console.log('%c========================================', 'color: #47bfff; font-weight: bold;');
   console.log('');
   console.log('📖 输入 %cFRF.help()%c 查看使用说明', 'color: #ff9800; font-weight: bold;', '');
-  console.log('🎯 快速开始: %cFRF.test(appId)%c', 'color: #ff9800; font-weight: bold;', '');
+  console.log('🚀 快速模式: %cFRF.quick(appId)%c - 单游戏最新数据', 'color: #ff9800; font-weight: bold;', '');
+  console.log('📚 字典模式: %cFRF.test(appId)%c - 多游戏快速查询', 'color: #4caf50; font-weight: bold;', '');
   console.log('');
 }
 
