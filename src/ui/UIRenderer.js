@@ -198,6 +198,62 @@ class UIRenderer {
   }
 
   /**
+   * 显示数据更新提示（后台更新发现数据改动时显示）
+   * @param {string} message - 提示消息
+   */
+  showUpdateNotice(message) {
+    // 先移除已有的提示
+    this.hideUpdateNotice();
+
+    const notice = document.createElement('div');
+    notice.className = 'frf_update_notice';
+    notice.innerHTML = `
+      <div class="frf_update_content">
+        <span class="frf_update_icon">🔔</span>
+        <span class="frf_update_text">${message}</span>
+        <button class="frf_update_btn" title="点击刷新获取最新数据">刷新</button>
+        <button class="frf_update_close" title="忽略">✕</button>
+      </div>
+    `;
+
+    // 刷新按钮事件
+    notice.querySelector('.frf_update_btn').addEventListener('click', () => {
+      this.hideUpdateNotice();
+      if (window.FRF && window.FRF.renderUI) {
+        window.FRF.renderUI(true); // 强制刷新
+      }
+    });
+
+    // 关闭按钮事件
+    notice.querySelector('.frf_update_close').addEventListener('click', () => {
+      this.hideUpdateNotice();
+    });
+
+    // 插入到页面顶部（容器之前）
+    if (this.container && this.container.parentNode) {
+      this.container.parentNode.insertBefore(notice, this.container);
+    } else {
+      // 备选：插入到筛选栏后面
+      const filterArea = document.querySelector('.apphub_SectionFilter');
+      if (filterArea && filterArea.parentNode) {
+        filterArea.parentNode.insertBefore(notice, filterArea.nextSibling);
+      }
+    }
+
+    this.logger.info('显示更新提示:', message);
+  }
+
+  /**
+   * 隐藏数据更新提示
+   */
+  hideUpdateNotice() {
+    const notice = document.querySelector('.frf_update_notice');
+    if (notice) {
+      notice.remove();
+    }
+  }
+
+  /**
    * 更新加载进度
    * @param {number} checked - 已检查好友数
    * @param {number} total - 总好友数
@@ -619,6 +675,63 @@ class UIRenderer {
       }
 
       .frf_banner_close:hover {
+        background: rgba(255, 255, 255, 0.1);
+        color: #fff;
+      }
+
+      /* FRF 更新提示 */
+      .frf_update_notice {
+        background: linear-gradient(135deg, rgba(255, 152, 0, 0.2) 0%, rgba(255, 193, 7, 0.15) 100%);
+        border: 1px solid rgba(255, 152, 0, 0.4);
+        border-radius: 4px;
+        margin: 10px 0 15px 0;
+        padding: 10px 16px;
+      }
+
+      .frf_update_content {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .frf_update_icon {
+        font-size: 18px;
+        flex-shrink: 0;
+      }
+
+      .frf_update_text {
+        flex: 1;
+        font-size: 13px;
+        color: #ffc107;
+      }
+
+      .frf_update_btn {
+        background: #ff9800;
+        border: none;
+        color: #fff;
+        font-size: 12px;
+        padding: 6px 14px;
+        border-radius: 2px;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+
+      .frf_update_btn:hover {
+        background: #f57c00;
+      }
+
+      .frf_update_close {
+        background: transparent;
+        border: none;
+        color: #8f98a0;
+        font-size: 14px;
+        cursor: pointer;
+        padding: 4px 8px;
+        border-radius: 2px;
+        transition: all 0.2s;
+      }
+
+      .frf_update_close:hover {
         background: rgba(255, 255, 255, 0.1);
         color: #fff;
       }
