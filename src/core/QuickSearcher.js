@@ -180,9 +180,10 @@ class QuickSearcher {
    * 通过 URL 重定向检测：有评测则停留在原 URL，无评测则重定向到 /recommended/
    *
    * @param {string} steamId - 好友 Steam ID
+   * @param {boolean} returnRaw - 是否返回原始数据（包含HTML）
    * @returns {Promise<Object|null>} 评测数据或 null
    */
-  async checkFriendReview(steamId) {
+  async checkFriendReview(steamId, returnRaw = false) {
     const url = `https://steamcommunity.com/profiles/${steamId}/recommended/${this.appId}/`;
     const startTime = Date.now();
 
@@ -215,6 +216,16 @@ class QuickSearcher {
 
       // 有评测，提取数据
       const html = await response.text();
+
+      // 如果需要原始数据（用于UI渲染），返回包含HTML的对象
+      if (returnRaw) {
+        return {
+          hasReview: true,
+          html: html,
+          steamId: steamId
+        };
+      }
+
       return this.extractReviewData(html, steamId);
 
     } catch (error) {

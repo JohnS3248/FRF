@@ -12,7 +12,7 @@ const MODE = process.argv.includes('--production') ? 'production' : 'development
 
 console.log(`\n📦 开始构建 (${MODE} 模式)...\n`);
 
-// 文件加载顺序（重要！）- v3.0 双模式架构
+// 文件加载顺序（重要！）- v3.1 双模式架构 + UI自动修复
 const SOURCE_FILES = [
   'src/utils/constants.js',
   'src/utils/logger.js',
@@ -23,6 +23,8 @@ const SOURCE_FILES = [
   'src/core/ReviewCache.js',          // 字典缓存
   'src/core/QuickSearcher.js',        // 快速搜索（v3.0 新增）
   'src/core/SteamAPI.js',
+  'src/ui/UIRenderer.js',             // UI渲染器（v3.1 新增）
+  'src/ui/PageDetector.js',           // 页面检测器（v3.1 新增）
   'src/main.js'
 ];
 
@@ -52,16 +54,20 @@ if (MODE === 'development') {
 
   const devCode = `
 /**
- * FRF v3.0 - 开发测试版本
- * 双模式架构：快速模式 + 字典模式
+ * FRF v3.1 - 开发测试版本
+ * 双模式架构 + UI自动修复
  *
  * 使用方法：
- * 1. 访问 https://steamcommunity.com/
+ * 1. 访问 Steam 好友评测页面（如 steamcommunity.com/app/413150/reviews/?browsefilter=createdbyfriends）
  * 2. 打开浏览器控制台（F12）
  * 3. 复制粘贴此文件全部内容并回车
- * 4. 运行 FRF.quick(appId) 或 FRF.test(appId)
+ * 4. FRF会自动检测并修复Steam渲染bug
  *
- * 快速模式（推荐）：
+ * UI渲染（v3.1 新增）：
+ * - FRF.renderUI()     渲染好友评测到页面
+ * - FRF.renderUI(true) 强制刷新重新获取
+ *
+ * 快速模式：
  * - FRF.quick(413150)  快速搜索星露谷物语
  * - FRF.pause()        暂停搜索
  * - FRF.resume()       继续搜索
@@ -98,8 +104,8 @@ ${combinedCode}
 // @name:en      Steam Friend Reviews Fixer
 // @namespace    https://github.com/JohnS3248/FRF
 // @version      ${packageJson.version}
-// @description  修复 Steam 好友评测页面 500 错误，通过遍历好友列表重建评测数据
-// @description:en Fix Steam friend reviews 500 error by rebuilding review list from friends' profiles
+// @description  自动修复 Steam 好友评测页面渲染 Bug，显示完整的好友评测列表
+// @description:en Auto-fix Steam friend reviews rendering bug, display complete friend review list
 // @author       JohnS3248
 // @match        https://steamcommunity.com/app/*/reviews/*
 // @match        https://steamcommunity.com/app/*
@@ -118,8 +124,8 @@ ${combinedCode}
 
 ${combinedCode}
 
-  // TODO: 油猴脚本自动运行逻辑（M2 阶段实现）
-  console.log('FRF 油猴脚本已加载');
+  // FRF 自动启动逻辑已内置于 main.js
+  // 脚本会自动检测好友评测页面并修复渲染bug
 
 })();
 `;
