@@ -1,6 +1,11 @@
 /**
- * 评测字典缓存管理器 - 新架构核心模块
+ * 评测字典缓存管理器 - v3.0 增强版
  * 负责构建、查询、持久化好友评测字典
+ *
+ * v3.0 新增：
+ * - 分段构建：支持暂停/继续
+ * - 断点续传：中断后可从上次位置继续
+ * - 进度保存：实时保存已处理的好友数据
  */
 
 class ReviewCache {
@@ -14,65 +19,260 @@ class ReviewCache {
 
     // 缓存键
     this.cacheKey = `${Constants.CACHE_KEY_PREFIX}review_dict_${Constants.CACHE_VERSION}`;
+    this.progressKey = `${Constants.CACHE_KEY_PREFIX}build_progress_${Constants.CACHE_VERSION}`;
+
+    // 构建状态
+    this.isBuilding = false;
+    this.isPaused = false;
+    this.currentIndex = 0;
+    this.friendIds = [];
+    this.startTime = 0;
+
+    // 回调
+    this.onProgress = null;
+    this.onComplete = null;
+    this.onPause = null;
   }
 
   /**
-   * 构建所有好友的评测字典
+   * 构建所有好友的评测字典（支持断点续传）
    * @param {Array<string>} friendIds - 好友 Steam ID 列表
-   * @param {Function} onProgress - 进度回调 (current, total, built)
+   * @param {Object} options - 配置选项
    * @returns {Promise<Object>} 评测字典
    */
-  async buildCache(friendIds, onProgress = null) {
-    this.logger.time('构建评测字典');
+  async buildCache(friendIds, options = {}) {
+    // 兼容旧 API：如果第二个参数是函数，转换为 options
+    if (typeof options === 'function') {
+      options = { onProgress: options };
+    }
+
+    this.onProgress = options.onProgress || null;
+    this.onComplete = options.onComplete || null;
+    this.onPause = options.onPause || null;
+
+    this.logger.info('========================================');
+    this.logger.info('  📚 字典模式 - 构建评测字典');
+    this.logger.info('========================================');
+    this.logger.info('');
+
+    // 检查是否有未完成的构建进度
+    const savedProgress = this.loadBuildProgress();
+    if (savedProgress && savedProgress.friendIds.length === friendIds.length) {
+      this.logger.info(`🔄 检测到未完成的构建进度`);
+      this.logger.info(`   已处理: ${savedProgress.currentIndex}/${friendIds.length}`);
+      this.logger.info(`   是否继续? 调用 FRF.resumeBuild() 继续，或 FRF.clearProgress() 重新开始`);
+      this.logger.info('');
+
+      // 恢复状态
+      this.friendIds = savedProgress.friendIds;
+      this.currentIndex = savedProgress.currentIndex;
+      this.friendReviewsMap = savedProgress.data;
+      return this.friendReviewsMap;
+    }
+
+    // 全新构建
+    this.friendIds = friendIds;
+    this.currentIndex = 0;
+    this.friendReviewsMap = {};
+    this.startTime = Date.now();
+
     this.logger.info(`开始构建评测字典，共 ${friendIds.length} 个好友`);
 
     const batchSize = this.throttler.getBatchSize();
     const delay = this.throttler.getDelay();
-    this.logger.info(`🔧 配置: 批次大小=${batchSize}, 延迟=${delay}ms`);
+    this.logger.info(`⚙️ 配置: 批次=${batchSize}, 延迟=${delay}ms`);
     this.logger.info('');
 
-    this.friendReviewsMap = {};
-    let processedCount = 0;
+    this.isBuilding = true;
+    this.isPaused = false;
 
-    // 批量处理
-    for (let i = 0; i < friendIds.length; i += batchSize) {
-      const batch = friendIds.slice(i, Math.min(i + batchSize, friendIds.length));
+    await this.processFriends();
+
+    return this.friendReviewsMap;
+  }
+
+  /**
+   * 处理好友列表（支持暂停）
+   */
+  async processFriends() {
+    const batchSize = this.throttler.getBatchSize();
+    const delay = this.throttler.getDelay();
+    const total = this.friendIds.length;
+
+    while (this.currentIndex < total) {
+      // 检查暂停
+      if (this.isPaused) {
+        this.logger.info(`⏸️ 已暂停 (${this.currentIndex}/${total})`);
+        this.saveBuildProgress();
+        if (this.onPause) {
+          this.onPause(this.currentIndex, total);
+        }
+        return;
+      }
+
+      // 获取当前批次
+      const batch = this.friendIds.slice(
+        this.currentIndex,
+        Math.min(this.currentIndex + batchSize, total)
+      );
 
       // 并发处理当前批次
       const promises = batch.map(steamId => this.processFriend(steamId));
       await Promise.all(promises);
 
-      processedCount += batch.length;
+      this.currentIndex += batch.length;
+
+      // 计算 ETA
+      const elapsed = Date.now() - this.startTime;
+      const avgPerFriend = elapsed / this.currentIndex;
+      const remaining = (total - this.currentIndex) * avgPerFriend;
+      const eta = this.formatTime(remaining);
 
       // 进度回调
-      if (onProgress) {
-        onProgress(processedCount, friendIds.length, Object.keys(this.friendReviewsMap).length);
+      if (this.onProgress) {
+        this.onProgress(this.currentIndex, total, Object.keys(this.friendReviewsMap).length, eta);
       }
 
-      // 每 9 个好友（3批）显示一次进度
-      if (processedCount % 9 === 0 || processedCount === friendIds.length) {
+      // 每 9 个好友显示一次进度
+      if (this.currentIndex % 9 === 0 || this.currentIndex === total) {
         this.logger.info(
-          `📊 进度: ${processedCount}/${friendIds.length}, ` +
-          `已收录: ${Object.keys(this.friendReviewsMap).length} 个好友`
+          `📊 进度: ${this.currentIndex}/${total}, ` +
+          `已收录: ${Object.keys(this.friendReviewsMap).length} 个好友, ` +
+          `预计剩余: ${eta}`
         );
       }
 
-      // 批次之间延迟
-      if (processedCount < friendIds.length) {
+      // 定期保存进度（每 30 个好友）
+      if (this.currentIndex % 30 === 0) {
+        this.saveBuildProgress();
+      }
+
+      // 批次延迟
+      if (this.currentIndex < total && !this.isPaused) {
         await this.delay(delay);
       }
     }
 
-    // 保存到本地缓存
+    // 构建完成
+    this.isBuilding = false;
+    this.clearBuildProgress();
     this.saveToCache();
 
-    this.logger.timeEnd('构建评测字典');
+    const elapsed = this.formatTime(Date.now() - this.startTime);
     this.logger.info('');
-    this.logger.info(`✅ 字典构建完成！`);
-    this.logger.info(`   📊 共收录 ${Object.keys(this.friendReviewsMap).length} 个好友的评测数据`);
+    this.logger.info('========================================');
+    this.logger.info('  ✅ 字典构建完成！');
+    this.logger.info('========================================');
+    this.logger.info(`📊 共收录 ${Object.keys(this.friendReviewsMap).length} 个好友的评测数据`);
+    this.logger.info(`⏱️ 总耗时: ${elapsed}`);
     this.logger.info('');
 
-    return this.friendReviewsMap;
+    if (this.onComplete) {
+      this.onComplete(this.friendReviewsMap);
+    }
+  }
+
+  /**
+   * 暂停构建
+   */
+  pauseBuild() {
+    if (this.isBuilding && !this.isPaused) {
+      this.isPaused = true;
+      this.logger.info('⏸️ 正在暂停...');
+    }
+  }
+
+  /**
+   * 继续构建
+   */
+  async resumeBuild() {
+    // 尝试从保存的进度恢复
+    const savedProgress = this.loadBuildProgress();
+    if (savedProgress) {
+      this.friendIds = savedProgress.friendIds;
+      this.currentIndex = savedProgress.currentIndex;
+      this.friendReviewsMap = savedProgress.data;
+      this.startTime = Date.now() - (savedProgress.elapsed || 0);
+    }
+
+    if (this.currentIndex < this.friendIds.length) {
+      this.isPaused = false;
+      this.isBuilding = true;
+      this.logger.info(`▶️ 继续构建 (${this.currentIndex}/${this.friendIds.length})...`);
+
+      await this.processFriends();
+    } else {
+      this.logger.info('❌ 没有可继续的构建任务');
+    }
+  }
+
+  /**
+   * 保存构建进度
+   */
+  saveBuildProgress() {
+    try {
+      const progress = {
+        friendIds: this.friendIds,
+        currentIndex: this.currentIndex,
+        data: this.friendReviewsMap,
+        elapsed: Date.now() - this.startTime,
+        timestamp: Date.now()
+      };
+      localStorage.setItem(this.progressKey, JSON.stringify(progress));
+      this.logger.debug('进度已保存');
+    } catch (error) {
+      this.logger.warn('保存进度失败', error);
+    }
+  }
+
+  /**
+   * 加载构建进度
+   */
+  loadBuildProgress() {
+    try {
+      const saved = localStorage.getItem(this.progressKey);
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch (error) {
+      this.logger.warn('加载进度失败', error);
+    }
+    return null;
+  }
+
+  /**
+   * 清除构建进度
+   */
+  clearBuildProgress() {
+    localStorage.removeItem(this.progressKey);
+  }
+
+  /**
+   * 获取构建状态
+   */
+  getBuildStatus() {
+    return {
+      isBuilding: this.isBuilding,
+      isPaused: this.isPaused,
+      currentIndex: this.currentIndex,
+      totalFriends: this.friendIds.length,
+      collectedFriends: Object.keys(this.friendReviewsMap).length,
+      progress: this.friendIds.length > 0
+        ? ((this.currentIndex / this.friendIds.length) * 100).toFixed(1)
+        : 0
+    };
+  }
+
+  /**
+   * 格式化时间
+   */
+  formatTime(ms) {
+    if (ms < 1000) return '< 1 秒';
+    const seconds = Math.floor(ms / 1000);
+    if (seconds < 60) return `${seconds} 秒`;
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes} 分 ${remainingSeconds} 秒`;
   }
 
   /**

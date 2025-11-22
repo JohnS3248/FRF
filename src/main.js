@@ -196,15 +196,51 @@ if (typeof window !== 'undefined') {
     },
 
     /**
-     * 刷新缓存
+     * 刷新/构建字典缓存（支持暂停/继续）
      */
     refresh: async function() {
-      console.log('🔄 开始刷新缓存...');
+      console.log('🔄 开始构建字典缓存...');
       const cache = new ReviewCache();
       const steamAPI = new SteamAPI('0');
       const friends = await steamAPI.getFriendsList();
+
+      window.frfCache = cache; // 保存实例以支持暂停/继续
       await cache.buildCache(friends);
-      console.log('✅ 缓存刷新完成');
+    },
+
+    /**
+     * 暂停字典构建
+     */
+    pauseBuild: function() {
+      if (window.frfCache) {
+        window.frfCache.pauseBuild();
+        console.log('⏸️ 字典构建已暂停');
+      } else {
+        console.log('❌ 没有正在进行的构建任务');
+      }
+    },
+
+    /**
+     * 继续字典构建
+     */
+    resumeBuild: async function() {
+      if (window.frfCache) {
+        await window.frfCache.resumeBuild();
+      } else {
+        // 尝试从 localStorage 恢复
+        const cache = new ReviewCache();
+        window.frfCache = cache;
+        await cache.resumeBuild();
+      }
+    },
+
+    /**
+     * 清除构建进度
+     */
+    clearProgress: function() {
+      const cache = new ReviewCache();
+      cache.clearBuildProgress();
+      console.log('✅ 构建进度已清除');
     },
 
     /**
@@ -213,7 +249,8 @@ if (typeof window !== 'undefined') {
     clearCache: function() {
       const cache = new ReviewCache();
       cache.clearCache();
-      console.log('✅ 缓存已清除');
+      cache.clearBuildProgress();
+      console.log('✅ 缓存和构建进度已清除');
     },
 
     /**
@@ -328,21 +365,20 @@ if (typeof window !== 'undefined') {
       console.log('');
       console.log('%c📚 字典模式:', 'color: #4caf50; font-weight: bold;');
       console.log('  FRF.test(appId)      - 字典模式查询');
-      console.log('  FRF.refresh()        - 刷新字典缓存');
-      console.log('  FRF.clearCache()     - 清除缓存');
+      console.log('  FRF.refresh()        - 构建/刷新字典');
+      console.log('  FRF.pauseBuild()     - 暂停构建');
+      console.log('  FRF.resumeBuild()    - 继续构建');
       console.log('  FRF.stats()          - 查看缓存统计');
       console.log('');
       console.log('%c⚙️ 其他:', 'color: #9e9e9e;');
       console.log('  FRF.getAppId()       - 获取当前页面游戏ID');
+      console.log('  FRF.clearCache()     - 清除缓存');
+      console.log('  FRF.clearProgress()  - 清除构建进度');
       console.log('  FRF.setDebug(true)   - 开启调试模式');
       console.log('');
       console.log('%c💡 模式对比:', 'color: #2196f3;');
-      console.log('  快速模式: 单游戏，最新数据，遍历好友');
-      console.log('  字典模式: 多游戏，缓存查询，需先构建');
-      console.log('');
-      console.log('%c💡 示例:', 'color: #2196f3;');
-      console.log('  FRF.quick(413150)    - 快速搜索《星露谷物语》');
-      console.log('  FRF.test(413150)     - 字典模式查询《星露谷物语》');
+      console.log('  快速模式: 单游戏，最新数据，遍历好友，约42秒');
+      console.log('  字典模式: 多游戏，缓存查询，需先构建字典');
       console.log('');
     }
   };
