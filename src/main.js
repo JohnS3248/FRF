@@ -510,8 +510,8 @@ if (typeof window !== 'undefined') {
         this._uiRenderer = new UIRenderer();
       }
 
-      // 先隐藏修复提示（如果有的话）
-      this._uiRenderer.hideFixingNotice();
+      // 隐藏欢迎横幅（开始渲染后不需要了）
+      this._uiRenderer.hideWelcomeBanner();
 
       if (!this._uiRenderer.init()) {
         console.error('❌ UI渲染器初始化失败，可能不在正确的页面');
@@ -792,7 +792,7 @@ if (typeof window !== 'undefined') {
         this._pageDetector = new PageDetector();
       }
 
-      // 初始化UI渲染器（用于显示修复提示）
+      // 初始化UI渲染器
       if (!this._uiRenderer) {
         this._uiRenderer = new UIRenderer();
       }
@@ -803,26 +803,30 @@ if (typeof window !== 'undefined') {
 
       // 立即检测当前页面
       this._pageDetector.detectAndTrigger(
-        // onNeedFix: Steam渲染失败，需要FRF修复
+        // onNeedFix: Steam渲染失败，需要FRF自动修复
         (appId) => {
           console.log(`🔧 检测到Steam渲染bug，自动启动FRF修复...`);
-          // 开始渲染（会自动隐藏修复提示）
+          // 隐藏欢迎横幅（开始渲染后不需要了）
+          self._uiRenderer.hideWelcomeBanner();
+          // 开始渲染
           self.renderUI();
         },
-        // onDetecting: 开始检测时立即显示提示
+        // onPageReady: 进入好友评测页面立即显示欢迎横幅和按钮
         (appId) => {
-          console.log(`🔍 检测好友评测页面渲染状态...`);
-          self._uiRenderer.showFixingNotice();
+          console.log(`🚀 FRF 已就绪，App ID: ${appId}`);
+          // 立即显示欢迎横幅
+          self._uiRenderer.showWelcomeBanner();
+          // 立即添加FRF刷新按钮
+          self._uiRenderer.addRefreshButton();
         }
       );
 
       // 监听页面变化（SPA导航）
       this._pageDetector.watchPageChanges((appId) => {
         console.log(`🔧 页面变化，重新检测...`);
-        // 立即显示修复提示
-        self._uiRenderer.showFixingNotice();
-        // 开始渲染
-        self.renderUI();
+        // 显示欢迎横幅和按钮
+        self._uiRenderer.showWelcomeBanner();
+        self._uiRenderer.addRefreshButton();
       });
 
       console.log('👀 FRF 自动检测已启动');

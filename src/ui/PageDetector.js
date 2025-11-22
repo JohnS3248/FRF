@@ -131,10 +131,10 @@ class PageDetector {
 
   /**
    * 检测并自动触发FRF
-   * @param {Function} callback - 需要FRF介入时的回调函数
-   * @param {Function} onDetecting - 开始检测时的回调（用于显示"检测中"提示）
+   * @param {Function} onNeedFix - 需要FRF修复时的回调
+   * @param {Function} onPageReady - 页面准备好时的回调（用于显示欢迎横幅和按钮）
    */
-  async detectAndTrigger(callback, onDetecting) {
+  async detectAndTrigger(onNeedFix, onPageReady) {
     if (this.isTriggered) {
       this.logger.debug('已经触发过，跳过');
       return;
@@ -154,63 +154,37 @@ class PageDetector {
 
     this.logger.info(`检测到好友评测页面，App ID: ${appId}`);
 
-    // 立即通知开始检测
-    if (onDetecting && typeof onDetecting === 'function') {
-      onDetecting(appId);
+    // 立即显示欢迎横幅和FRF按钮（不等待检测结果）
+    if (onPageReady && typeof onPageReady === 'function') {
+      onPageReady(appId);
     }
 
-    // 检查Steam原生渲染是否成功
+    // 后台检查Steam原生渲染是否成功
     const steamSuccess = await this.checkSteamRenderSuccess();
 
     if (steamSuccess) {
-      this.logger.info('Steam 原生渲染成功，FRF 不介入');
-      // 隐藏修复提示（如果显示了的话）
-      this.hideFixingNotice();
-      // 仍然添加刷新按钮，以便用户手动刷新
-      this.addManualTriggerHint();
+      this.logger.info('Steam 原生渲染成功，FRF 待命');
+      // Steam正常工作，横幅和按钮保留，用户可手动使用FRF
       return;
     }
 
-    // Steam渲染失败，触发FRF
+    // Steam渲染失败，自动触发FRF修复
     this.logger.info('Steam 渲染失败，FRF 自动介入');
     this.isTriggered = true;
 
-    if (callback && typeof callback === 'function') {
-      callback(appId);
+    if (onNeedFix && typeof onNeedFix === 'function') {
+      onNeedFix(appId);
     }
   }
 
   /**
-   * 隐藏修复提示
+   * 隐藏欢迎横幅
    */
-  hideFixingNotice() {
-    const notice = document.querySelector('.frf_fixing_notice');
-    if (notice) {
-      notice.remove();
+  hideWelcomeBanner() {
+    const banner = document.querySelector('.frf_welcome_banner');
+    if (banner) {
+      banner.remove();
     }
-  }
-
-  /**
-   * 添加手动触发提示
-   */
-  addManualTriggerHint() {
-    // 如果Steam正常工作，可以添加一个小提示让用户知道FRF可用
-    const filterArea = document.querySelector('.apphub_SectionFilter');
-    if (!filterArea) return;
-
-    // 检查是否已存在
-    if (document.querySelector('.frf_hint')) return;
-
-    const hint = document.createElement('div');
-    hint.className = 'frf_hint';
-    hint.style.cssText = 'display: inline-block; margin-left: 10px; font-size: 12px; color: #8f98a0;';
-    hint.innerHTML = `
-      <span style="cursor: pointer;" onclick="window.FRF && window.FRF.renderUI(true)">
-        [FRF 可用]
-      </span>
-    `;
-
-    filterArea.appendChild(hint);
   }
 
   /**
