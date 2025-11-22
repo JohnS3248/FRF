@@ -768,17 +768,22 @@ if (typeof window !== 'undefined') {
 
     /**
      * 将快速模式结果同步到字典缓存
+     * 无论是否有现有缓存，都会保存结果
      */
     _syncQuickResultsToDict: function(reviews, appId) {
       try {
         const cache = new ReviewCache();
-        if (cache.loadFromCache()) {
-          reviews.forEach(review => {
-            cache.addReviewToCache(review.steamId, appId);
-          });
-          cache.saveToCache();
-          console.log(`🔗 已将 ${reviews.length} 条评测同步到字典缓存`);
-        }
+        // 尝试加载现有缓存，如果没有也没关系
+        cache.loadFromCache();
+
+        // 添加新的评测记录
+        reviews.forEach(review => {
+          cache.addReviewToCache(review.steamId, appId);
+        });
+
+        // 保存到缓存
+        cache.saveToCache();
+        console.log(`🔗 已将 ${reviews.length} 条评测同步到字典缓存`);
       } catch (error) {
         console.warn('同步到字典失败:', error);
       }

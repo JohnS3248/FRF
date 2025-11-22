@@ -37,7 +37,7 @@
 
 const Constants = {
   // ==================== 版本信息 ====================
-  VERSION: '1.0.0',
+  VERSION: '4.1.0',
   CACHE_VERSION: 'v2', // 新架构缓存版本
 
   // ==================== 请求配置 ====================
@@ -384,7 +384,11 @@ class ReviewExtractor {
       // 评测内容（新增）
       reviewContent: this.extractReviewContent(html),
       helpfulCount: this.extractHelpfulCount(html),
-      funnyCount: this.extractFunnyCount(html)
+      funnyCount: this.extractFunnyCount(html),
+
+      // 互动数据
+      commentCount: this.extractCommentCount(html),
+      awardCount: this.extractAwardCount(html)
     };
 
     this.logger.debug('提取完整评测数据', {
@@ -555,6 +559,57 @@ class ReviewExtractor {
       if (match) {
         return parseInt(match[1], 10);
       }
+    }
+
+    return 0;
+  }
+
+  /**
+   * 提取评论数
+   * 页面结构: <span id="commentthread_..._totalcount">16</span> 条留言
+   */
+  extractCommentCount(html) {
+    const patterns = [
+      // 中文：totalcount + 条留言
+      /commentthread_[^"]*_totalcount[^>]*>(\d+)<\/span>\s*条留言/,
+      // 英文：totalcount + Comments
+      /commentthread_[^"]*_totalcount[^>]*>(\d+)<\/span>\s*Comments?/i,
+      // 备用：直接匹配 totalcount
+      /_totalcount[^>]*>(\d+)</,
+      // 备用：直接匹配数字+留言
+      />(\d+)<\/span>\s*条留言/,
+      />(\d+)<\/span>\s*Comments?</i
+    ];
+
+    for (const pattern of patterns) {
+      const match = html.match(pattern);
+      if (match) {
+        return parseInt(match[1], 10);
+      }
+    }
+
+    return 0;
+  }
+
+  /**
+   * 提取奖励数
+   * 页面结构: more_btn 中的 data-count="8" 或累加所有 review_award_count
+   */
+  extractAwardCount(html) {
+    // 方法1：从 more_btn 的 data-count 属性获取总数（最准确）
+    const dataCountMatch = html.match(/more_btn[^>]*data-count="(\d+)"/);
+    if (dataCountMatch) {
+      return parseInt(dataCountMatch[1], 10);
+    }
+
+    // 方法2：累加所有 review_award_count 的数字
+    const countMatches = html.matchAll(/review_award_count[^>]*>(\d+)</g);
+    let total = 0;
+    for (const match of countMatches) {
+      total += parseInt(match[1], 10);
+    }
+    if (total > 0) {
+      return total;
     }
 
     return 0;
@@ -2011,50 +2066,77 @@ class UIRenderer {
   }
 
   /**
-   * 显示修复中提示（在原bug区域显示）
+   * 显示 FRF 欢迎横幅（进入好友评测页面立即显示）
    */
-  showFixingNotice() {
+  showWelcomeBanner() {
     // 确保样式已注入
     this.injectStyles();
 
-    // 在原来bug显示的位置（#apphub_InitialContent之后或其位置）显示提示
-    const initialContent = document.querySelector('#apphub_InitialContent');
-    const headerContent = document.querySelector('.apphub_HomeHeaderContent');
-
     // 检查是否已存在
-    if (document.querySelector('.frf_fixing_notice')) return;
+    if (document.querySelector('.frf_welcome_banner')) return;
 
-    const notice = document.createElement('div');
-    notice.className = 'frf_fixing_notice';
-    notice.innerHTML = `
-      <div class="frf_notice_content">
-        <img src="https://community.fastly.steamstatic.com/public/images/login/throbber.gif" alt="Loading">
-        <span class="frf_notice_text">正在检测好友评测...</span>
+    const banner = document.createElement('div');
+    banner.className = 'frf_welcome_banner';
+    banner.innerHTML = `
+      <div class="frf_banner_content">
+        <div class="frf_banner_icon">🚀</div>
+        <div class="frf_banner_text">
+          <div class="frf_banner_title">FRF 好友评测增强工具已启动</div>
+          <div class="frf_banner_desc">
+            <span class="frf_banner_item">• 检测到渲染问题将自动修复</span>
+            <span class="frf_banner_item">• 点击上方 <strong>FRF 刷新</strong> 按钮可使用增强阅读模式</span>
+          </div>
+        </div>
+        <button class="frf_banner_close" title="关闭提示">✕</button>
       </div>
     `;
 
-    // 找合适的插入位置
-    if (initialContent && initialContent.parentNode) {
-      initialContent.parentNode.insertBefore(notice, initialContent.nextSibling);
-      this.logger.info('显示修复提示（在 apphub_InitialContent 后）');
-    } else if (headerContent && headerContent.parentNode) {
-      headerContent.parentNode.insertBefore(notice, headerContent.nextSibling);
-      this.logger.info('显示修复提示（在 apphub_HomeHeaderContent 后）');
+    // 关闭按钮事件
+    banner.querySelector('.frf_banner_close').addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.hideWelcomeBanner();
+    });
+
+    // 找合适的插入位置（在筛选栏下方）
+    const filterArea = document.querySelector('.apphub_SectionFilter');
+    if (filterArea && filterArea.parentNode) {
+      filterArea.parentNode.insertBefore(banner, filterArea.nextSibling);
+      this.logger.info('显示欢迎横幅（在筛选栏后）');
     } else {
-      // 备选：添加到 body
-      document.body.appendChild(notice);
-      this.logger.info('显示修复提示（添加到 body）');
+      // 备选位置
+      const initialContent = document.querySelector('#apphub_InitialContent');
+      if (initialContent && initialContent.parentNode) {
+        initialContent.parentNode.insertBefore(banner, initialContent);
+        this.logger.info('显示欢迎横幅（在 apphub_InitialContent 前）');
+      }
     }
   }
 
   /**
-   * 隐藏修复中提示
+   * 隐藏欢迎横幅
+   */
+  hideWelcomeBanner() {
+    const banner = document.querySelector('.frf_welcome_banner');
+    if (banner) {
+      banner.remove();
+    }
+  }
+
+  /**
+   * 显示修复中提示（已废弃，保留兼容）
+   * @deprecated 使用 showWelcomeBanner 替代
+   */
+  showFixingNotice() {
+    // 改为显示欢迎横幅
+    this.showWelcomeBanner();
+  }
+
+  /**
+   * 隐藏修复中提示（已废弃，保留兼容）
+   * @deprecated 使用 hideWelcomeBanner 替代
    */
   hideFixingNotice() {
-    const notice = document.querySelector('.frf_fixing_notice');
-    if (notice) {
-      notice.remove();
-    }
+    this.hideWelcomeBanner();
   }
 
   /**
@@ -2118,29 +2200,44 @@ class UIRenderer {
 
     const recommendText = review.isPositive ? '推荐' : '不推荐';
 
-    // 显示完整评测内容
-    const displayContent = review.reviewContent || '';
+    // 截断过长的评测内容（安全截断，避免破坏HTML标签）
+    const maxContentLength = 300;
+    let displayContent = this.safeHTMLTruncate(review.reviewContent || '', maxContentLength);
 
-    // 格式化有价值人数
-    const helpfulText = review.helpfulCount > 0
-      ? `有 ${review.helpfulCount} 人觉得这篇评测有价值`
-      : '尚未有人觉得这篇评测有价值';
+    // 格式化有价值/欢乐人数（如果都为0则不显示）
+    let helpfulText = '';
+    if (review.helpfulCount > 0 && review.funnyCount > 0) {
+      helpfulText = `有 ${review.helpfulCount} 人觉得这篇评测有价值，有 ${review.funnyCount} 人觉得这篇评测很欢乐`;
+    } else if (review.helpfulCount > 0) {
+      helpfulText = `有 ${review.helpfulCount} 人觉得这篇评测有价值`;
+    } else if (review.funnyCount > 0) {
+      helpfulText = `有 ${review.funnyCount} 人觉得这篇评测很欢乐`;
+    }
+    // 如果都为0，helpfulText保持空字符串，不显示该行
 
     // 用户头像（使用默认头像作为后备）
     const avatarUrl = review.userAvatar ||
       'https://avatars.fastly.steamstatic.com/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_medium.jpg';
 
+    // 格式化日期显示（发布于 + 更新于）
+    let dateText = `发布于：${review.publishDate}`;
+    if (review.updateDate) {
+      dateText += `<br>更新于：${review.updateDate}`;
+    }
+
     // 完全自定义HTML结构，使用frf_前缀避免Steam CSS干扰
     return `
       <div class="frf_card_inner">
-        <!-- 顶部：有价值人数 -->
+        <!-- 顶部：有价值人数（如果有的话） -->
+        ${helpfulText ? `
         <div class="frf_helpful_row">
           <span class="frf_helpful_text">${helpfulText}</span>
           <span class="frf_award">
             <img src="https://community.fastly.steamstatic.com/public/shared/images/award_icon_blue.svg" class="frf_award_icon">
-            <span>0</span>
+            <span>${review.awardCount || 0}</span>
           </span>
         </div>
+        ` : ''}
 
         <!-- 推荐区域 -->
         <div class="frf_recommend_row">
@@ -2151,8 +2248,8 @@ class UIRenderer {
           </div>
         </div>
 
-        <!-- 发布日期 -->
-        <div class="frf_date_row">发布于：${review.publishDate}</div>
+        <!-- 发布/更新日期 -->
+        <div class="frf_date_row">${dateText}</div>
 
         <!-- 评测内容 -->
         <div class="frf_content_row">${displayContent}</div>
@@ -2169,8 +2266,10 @@ class UIRenderer {
             </div>
           </div>
           <div class="frf_comment_area">
-            <span class="frf_comment_icon">💬</span>
-            <span class="frf_comment_count">0</span>
+            <svg class="frf_comment_icon" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M21 6h-2V3c0-1.1-.9-2-2-2H3c-1.1 0-2 .9-2 2v14l4-4h7v4c0 1.1.9 2 2 2h7l4 4V8c0-1.1-.9-2-2-2zM5 11c-.83 0-1.5-.67-1.5-1.5S4.17 8 5 8s1.5.67 1.5 1.5S5.83 11 5 11zm4 0c-.83 0-1.5-.67-1.5-1.5S8.17 8 9 8s1.5.67 1.5 1.5S9.83 11 9 11zm4 0c-.83 0-1.5-.67-1.5-1.5S12.17 8 13 8s1.5.67 1.5 1.5S13.83 11 13 11z"/>
+            </svg>
+            <span class="frf_comment_count">${review.commentCount || 0}</span>
           </div>
         </div>
       </div>
@@ -2306,6 +2405,74 @@ class UIRenderer {
   }
 
   /**
+   * 安全截断HTML内容，避免破坏标签结构
+   * @param {string} html - HTML内容
+   * @param {number} maxLength - 最大纯文本长度
+   * @returns {string} 截断后的HTML
+   */
+  safeHTMLTruncate(html, maxLength) {
+    if (!html) return '';
+
+    // 先统计纯文本长度（不含HTML标签）
+    const textContent = html.replace(/<[^>]*>/g, '');
+    if (textContent.length <= maxLength) {
+      return html;
+    }
+
+    // 需要截断：逐字符遍历，跟踪标签状态
+    let result = '';
+    let textCount = 0;
+    let inTag = false;
+    let currentTag = '';
+    const openTags = []; // 记录打开的标签
+
+    for (let i = 0; i < html.length && textCount < maxLength; i++) {
+      const char = html[i];
+
+      if (char === '<') {
+        inTag = true;
+        currentTag = '<';
+      } else if (char === '>') {
+        inTag = false;
+        currentTag += '>';
+        result += currentTag;
+
+        // 解析标签名
+        const tagMatch = currentTag.match(/^<\/?([a-zA-Z]+)/);
+        if (tagMatch) {
+          const tagName = tagMatch[1].toLowerCase();
+          if (currentTag.startsWith('</')) {
+            // 闭合标签：从栈中移除
+            const idx = openTags.lastIndexOf(tagName);
+            if (idx !== -1) openTags.splice(idx, 1);
+          } else if (!currentTag.endsWith('/>') && !['br', 'hr', 'img'].includes(tagName)) {
+            // 开始标签（非自闭合）：加入栈
+            openTags.push(tagName);
+          }
+        }
+        currentTag = '';
+        continue;
+      } else if (inTag) {
+        currentTag += char;
+      } else {
+        // 普通文本字符
+        result += char;
+        textCount++;
+      }
+    }
+
+    // 添加省略号
+    result += '...';
+
+    // 闭合所有未闭合的标签（逆序）
+    for (let i = openTags.length - 1; i >= 0; i--) {
+      result += `</${openTags[i]}>`;
+    }
+
+    return result;
+  }
+
+  /**
    * 注入自定义样式
    */
   injectStyles() {
@@ -2314,23 +2481,66 @@ class UIRenderer {
     const style = document.createElement('style');
     style.id = 'frf_styles';
     style.textContent = `
-      /* FRF 修复提示 - 与加载状态完全一致的样式 */
-      .frf_fixing_notice {
-        padding: 40px;
-        text-align: center;
-        color: #8f98a0;
+      /* FRF 欢迎横幅 */
+      .frf_welcome_banner {
+        background: linear-gradient(135deg, rgba(103, 193, 245, 0.15) 0%, rgba(78, 180, 241, 0.1) 100%);
+        border: 1px solid rgba(103, 193, 245, 0.3);
+        border-radius: 4px;
+        margin: 10px 0 15px 0;
+        padding: 12px 16px;
       }
 
-      .frf_notice_content {
+      .frf_banner_content {
         display: flex;
         align-items: center;
-        justify-content: center;
-        gap: 10px;
+        gap: 12px;
       }
 
-      .frf_notice_text {
+      .frf_banner_icon {
+        font-size: 24px;
+        flex-shrink: 0;
+      }
+
+      .frf_banner_text {
+        flex: 1;
+      }
+
+      .frf_banner_title {
         font-size: 14px;
+        font-weight: bold;
+        color: #67c1f5;
+        margin-bottom: 4px;
+      }
+
+      .frf_banner_desc {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .frf_banner_item {
+        font-size: 12px;
+        color: #acb2b8;
+      }
+
+      .frf_banner_item strong {
+        color: #67c1f5;
+      }
+
+      .frf_banner_close {
+        background: transparent;
+        border: none;
         color: #8f98a0;
+        font-size: 16px;
+        cursor: pointer;
+        padding: 4px 8px;
+        border-radius: 2px;
+        transition: all 0.2s;
+      }
+
+      .frf_banner_close:hover {
+        background: rgba(255, 255, 255, 0.1);
+        color: #fff;
       }
 
       /* FRF 加载状态 */
@@ -2549,7 +2759,10 @@ class UIRenderer {
       }
 
       .frf_comment_icon {
-        font-size: 14px;
+        width: 16px;
+        height: 16px;
+        opacity: 0.7;
+        flex-shrink: 0;
       }
 
       .frf_comment_count {
@@ -2702,10 +2915,10 @@ class PageDetector {
 
   /**
    * 检测并自动触发FRF
-   * @param {Function} callback - 需要FRF介入时的回调函数
-   * @param {Function} onDetecting - 开始检测时的回调（用于显示"检测中"提示）
+   * @param {Function} onNeedFix - 需要FRF修复时的回调
+   * @param {Function} onPageReady - 页面准备好时的回调（用于显示欢迎横幅和按钮）
    */
-  async detectAndTrigger(callback, onDetecting) {
+  async detectAndTrigger(onNeedFix, onPageReady) {
     if (this.isTriggered) {
       this.logger.debug('已经触发过，跳过');
       return;
@@ -2725,63 +2938,37 @@ class PageDetector {
 
     this.logger.info(`检测到好友评测页面，App ID: ${appId}`);
 
-    // 立即通知开始检测
-    if (onDetecting && typeof onDetecting === 'function') {
-      onDetecting(appId);
+    // 立即显示欢迎横幅和FRF按钮（不等待检测结果）
+    if (onPageReady && typeof onPageReady === 'function') {
+      onPageReady(appId);
     }
 
-    // 检查Steam原生渲染是否成功
+    // 后台检查Steam原生渲染是否成功
     const steamSuccess = await this.checkSteamRenderSuccess();
 
     if (steamSuccess) {
-      this.logger.info('Steam 原生渲染成功，FRF 不介入');
-      // 隐藏修复提示（如果显示了的话）
-      this.hideFixingNotice();
-      // 仍然添加刷新按钮，以便用户手动刷新
-      this.addManualTriggerHint();
+      this.logger.info('Steam 原生渲染成功，FRF 待命');
+      // Steam正常工作，横幅和按钮保留，用户可手动使用FRF
       return;
     }
 
-    // Steam渲染失败，触发FRF
+    // Steam渲染失败，自动触发FRF修复
     this.logger.info('Steam 渲染失败，FRF 自动介入');
     this.isTriggered = true;
 
-    if (callback && typeof callback === 'function') {
-      callback(appId);
+    if (onNeedFix && typeof onNeedFix === 'function') {
+      onNeedFix(appId);
     }
   }
 
   /**
-   * 隐藏修复提示
+   * 隐藏欢迎横幅
    */
-  hideFixingNotice() {
-    const notice = document.querySelector('.frf_fixing_notice');
-    if (notice) {
-      notice.remove();
+  hideWelcomeBanner() {
+    const banner = document.querySelector('.frf_welcome_banner');
+    if (banner) {
+      banner.remove();
     }
-  }
-
-  /**
-   * 添加手动触发提示
-   */
-  addManualTriggerHint() {
-    // 如果Steam正常工作，可以添加一个小提示让用户知道FRF可用
-    const filterArea = document.querySelector('.apphub_SectionFilter');
-    if (!filterArea) return;
-
-    // 检查是否已存在
-    if (document.querySelector('.frf_hint')) return;
-
-    const hint = document.createElement('div');
-    hint.className = 'frf_hint';
-    hint.style.cssText = 'display: inline-block; margin-left: 10px; font-size: 12px; color: #8f98a0;';
-    hint.innerHTML = `
-      <span style="cursor: pointer;" onclick="window.FRF && window.FRF.renderUI(true)">
-        [FRF 可用]
-      </span>
-    `;
-
-    filterArea.appendChild(hint);
   }
 
   /**
@@ -2842,12 +3029,17 @@ if (typeof window !== 'undefined') {
 // ==================== src/main.js ====================
 
 /**
- * FRF - Friend Review Finder v3.0
+ * FRF - Friend Review Finder v4.1
  * 主程序
  *
  * 双模式架构：
- * - 快速模式：单游戏搜索，遍历好友，获取最新数据
- * - 字典模式：构建缓存字典，多游戏快速查询
+ * - 快速模式：单游戏搜索，遍历好友，获取最新数据（默认）
+ * - 字典模式：利用已有缓存快速查询（需先构建字典）
+ *
+ * v4.1 新增：
+ * - 分批渲染：每找到5篇评测立即渲染，提升用户体验
+ * - 字典优先：有缓存时优先使用字典模式
+ * - 字典初始化独立：buildDict 作为独立功能，不自动触发
  */
 
 class FriendReviewFinder {
@@ -3011,17 +3203,108 @@ if (typeof window !== 'undefined') {
   // 全局辅助对象
   window.FRF = {
     /**
-     * 快速测试
+     * 字典模式查询（仅在有缓存时工作）
+     * 不会自动构建字典，需要先调用 FRF.buildDict()
      */
     test: async function(appId) {
       console.log(`%c========================================`, 'color: #47bfff; font-weight: bold;');
-      console.log(`%c  🎮 测试游戏 App ID: ${appId}`, 'color: #47bfff; font-weight: bold; font-size: 14px;');
+      console.log(`%c  📚 字典模式查询 - 游戏 ${appId}`, 'color: #47bfff; font-weight: bold; font-size: 14px;');
       console.log(`%c========================================`, 'color: #47bfff; font-weight: bold;');
       console.log('');
 
+      const cache = new ReviewCache();
+      const cacheLoaded = cache.loadFromCache();
+
+      if (!cacheLoaded) {
+        console.log('%c❌ 字典缓存不存在！', 'color: #ff5722; font-weight: bold;');
+        console.log('');
+        console.log('💡 字典模式需要先构建字典缓存：');
+        console.log('   %cFRF.buildDict()%c - 构建字典（耗时1-3分钟，但只需执行一次）', 'color: #ff9800; font-weight: bold;', '');
+        console.log('');
+        console.log('🚀 或使用快速模式直接查询：');
+        console.log('   %cFRF.quick(' + appId + ')%c - 快速搜索此游戏', 'color: #ff9800; font-weight: bold;', '');
+        return null;
+      }
+
+      // 查询游戏
+      const matchedFriends = cache.findFriendsWithReview(String(appId));
+
+      if (matchedFriends.length === 0) {
+        console.log('😢 字典中没有此游戏的好友评测记录');
+        console.log('');
+        console.log('💡 可能原因：');
+        console.log('   1. 你的好友没有评测过这款游戏');
+        console.log('   2. 字典构建后有新的好友评测了这款游戏');
+        console.log('');
+        console.log('🚀 使用快速模式获取最新数据：');
+        console.log('   %cFRF.quick(' + appId + ')%c', 'color: #ff9800; font-weight: bold;', '');
+        return [];
+      }
+
+      console.log(`🎯 找到 ${matchedFriends.length} 个好友评测了这款游戏`);
+      console.log('');
+
+      // 获取详细数据
       const finder = new FriendReviewFinder(appId);
-      await finder.fetchReviews();
+      finder.cache = cache;
+      const steamAPI = new SteamAPI(appId);
+      finder.reviews = await steamAPI.batchGetReviews(matchedFriends, (current, total, found) => {
+        if (current % 5 === 0 || current === total) {
+          console.log(`📊 进度: ${current}/${total}`);
+        }
+      });
+
+      finder.showResults();
+      window.frfReviews = finder.reviews;
+      console.log('💾 评测数据已保存到 window.frfReviews');
+
       return finder;
+    },
+
+    /**
+     * 构建字典缓存（独立功能，耗时较长）
+     * 这是一个隐藏功能，将在后续添加到设置页面
+     */
+    buildDict: async function() {
+      console.log('%c========================================', 'color: #4caf50; font-weight: bold;');
+      console.log('%c  📚 构建字典缓存', 'color: #4caf50; font-weight: bold; font-size: 14px;');
+      console.log('%c========================================', 'color: #4caf50; font-weight: bold;');
+      console.log('');
+      console.log('%c⚠️ 注意：此过程需要 1-3 分钟，但只需执行一次', 'color: #ff9800;');
+      console.log('   构建完成后，字典模式查询将秒速完成');
+      console.log('');
+
+      const cache = new ReviewCache();
+      const steamAPI = new SteamAPI('0');
+
+      // 检查是否有未完成的构建
+      const savedProgress = cache.loadBuildProgress();
+      if (savedProgress) {
+        console.log(`📋 发现未完成的构建进度 (${savedProgress.processedCount}/${savedProgress.friendIds.length})`);
+        console.log('   使用 %cFRF.resumeBuild()%c 继续构建', 'color: #ff9800; font-weight: bold;', '');
+        console.log('   使用 %cFRF.clearProgress()%c 清除进度重新开始', 'color: #ff9800; font-weight: bold;', '');
+        return;
+      }
+
+      console.log('📥 获取好友列表...');
+      const friends = await steamAPI.getFriendsList();
+      console.log(`✅ 找到 ${friends.length} 个好友`);
+      console.log('');
+
+      window.frfCache = cache; // 保存实例以支持暂停/继续
+
+      await cache.buildCache(friends, (current, total, built) => {
+        if (current % 10 === 0 || current === total) {
+          const percent = Math.round(current / total * 100);
+          console.log(`📊 进度: ${current}/${total} (${percent}%) - 已收录 ${built} 篇评测`);
+        }
+      });
+
+      console.log('');
+      console.log('%c✅ 字典构建完成！', 'color: #4caf50; font-weight: bold;');
+      console.log('');
+      console.log('💡 现在可以使用字典模式快速查询：');
+      console.log('   %cFRF.test(appId)%c - 秒速查询任意游戏', 'color: #4caf50; font-weight: bold;', '');
     },
 
     /**
@@ -3198,17 +3481,21 @@ if (typeof window !== 'undefined') {
      */
     help: function() {
       console.log('%c========================================', 'color: #47bfff; font-weight: bold;');
-      console.log('%c  📖 FRF v3.0 使用指南', 'color: #47bfff; font-weight: bold; font-size: 16px;');
+      console.log('%c  📖 FRF v4.1 使用指南', 'color: #47bfff; font-weight: bold; font-size: 16px;');
       console.log('%c========================================', 'color: #47bfff; font-weight: bold;');
       console.log('');
-      console.log('%c🚀 快速模式（推荐）:', 'color: #ff9800; font-weight: bold;');
+      console.log('%c🔧 自动修复（默认）:', 'color: #9c27b0; font-weight: bold;');
+      console.log('  FRF会自动检测Steam好友评测页面的渲染bug');
+      console.log('  检测到bug后自动修复，支持分批渲染（每5篇显示一次）');
+      console.log('');
+      console.log('%c🚀 快速模式:', 'color: #ff9800; font-weight: bold;');
       console.log('  FRF.quick(appId)     - 单游戏快速搜索');
       console.log('  FRF.pause()          - 暂停搜索');
       console.log('  FRF.resume()         - 继续搜索');
       console.log('');
       console.log('%c📚 字典模式:', 'color: #4caf50; font-weight: bold;');
-      console.log('  FRF.test(appId)      - 字典模式查询');
-      console.log('  FRF.refresh()        - 构建/刷新字典');
+      console.log('  FRF.buildDict()      - 构建字典（首次需要1-3分钟）');
+      console.log('  FRF.test(appId)      - 字典模式查询（需先构建）');
       console.log('  FRF.pauseBuild()     - 暂停构建');
       console.log('  FRF.resumeBuild()    - 继续构建');
       console.log('  FRF.stats()          - 查看缓存统计');
@@ -3223,13 +3510,10 @@ if (typeof window !== 'undefined') {
       console.log('  FRF.clearProgress()  - 清除构建进度');
       console.log('  FRF.setDebug(true)   - 开启调试模式');
       console.log('');
-      console.log('%c💡 模式对比:', 'color: #2196f3;');
-      console.log('  快速模式: 单游戏，最新数据，遍历好友，约42秒');
-      console.log('  字典模式: 多游戏，缓存查询，需先构建字典');
-      console.log('');
-      console.log('%c🔧 自动修复:', 'color: #9c27b0;');
-      console.log('  FRF会自动检测Steam好友评测页面的渲染bug');
-      console.log('  如果检测到bug，会自动获取并渲染好友评测');
+      console.log('%c💡 模式说明:', 'color: #2196f3;');
+      console.log('  自动修复: 优先使用字典缓存，无缓存则使用快速模式');
+      console.log('  快速模式: 单游戏，最新数据，约42秒');
+      console.log('  字典模式: 多游戏秒速查询，需先构建字典');
       console.log('');
     },
 
@@ -3256,8 +3540,8 @@ if (typeof window !== 'undefined') {
         this._uiRenderer = new UIRenderer();
       }
 
-      // 先隐藏修复提示（如果有的话）
-      this._uiRenderer.hideFixingNotice();
+      // 隐藏欢迎横幅（开始渲染后不需要了）
+      this._uiRenderer.hideWelcomeBanner();
 
       if (!this._uiRenderer.init()) {
         console.error('❌ UI渲染器初始化失败，可能不在正确的页面');
@@ -3302,42 +3586,50 @@ if (typeof window !== 'undefined') {
 
     /**
      * 为UI获取评测数据（智能选择模式）
+     * 优先级：字典缓存 > 快速模式
+     *
      * @param {string} appId - 游戏ID
-     * @param {boolean} forceRefresh - 是否强制刷新
+     * @param {boolean} forceRefresh - 是否强制刷新（忽略缓存）
      * @returns {Promise<Array>} 评测数据数组（完整版）
      */
     _fetchReviewsForUI: async function(appId, forceRefresh) {
       const cache = new ReviewCache();
+
+      // 强制刷新时直接使用快速模式
+      if (forceRefresh) {
+        console.log('🔄 强制刷新，使用快速模式...');
+        return await this._fetchReviewsQuickMode(appId);
+      }
+
+      // 检查字典缓存
       const cacheLoaded = cache.loadFromCache();
 
-      // 检查字典缓存中是否有这个游戏
-      let useQuickMode = forceRefresh || !cacheLoaded;
-
-      if (cacheLoaded && !forceRefresh) {
+      if (cacheLoaded) {
         const matchedFriends = cache.findFriendsWithReview(appId);
         if (matchedFriends.length > 0) {
           console.log(`📚 字典命中！找到 ${matchedFriends.length} 个好友评测`);
-          useQuickMode = false;
-
-          // 使用字典模式：获取详细数据
+          // 使用字典模式：分批获取详细数据
           return await this._fetchFullReviews(matchedFriends, appId);
         } else {
           console.log('📚 字典中无此游戏记录，切换到快速模式');
-          useQuickMode = true;
         }
+      } else {
+        console.log('📚 无字典缓存，使用快速模式');
       }
 
-      if (useQuickMode) {
-        console.log('🚀 使用快速模式获取数据...');
-        return await this._fetchReviewsQuickMode(appId);
-      }
+      // 使用快速模式
+      console.log('🚀 使用快速模式获取数据...');
+      return await this._fetchReviewsQuickMode(appId);
     },
 
     /**
      * 快速模式获取完整评测数据（用于UI）
+     * 分批渲染：每找到5篇评测立即渲染
      */
     _fetchReviewsQuickMode: async function(appId) {
       const reviews = [];
+      const pendingRender = []; // 待渲染队列
+      const RENDER_BATCH_SIZE = 5; // 每5篇渲染一次
       const extractor = new ReviewExtractor();
 
       const searcher = new QuickSearcher(appId);
@@ -3351,7 +3643,18 @@ if (typeof window !== 'undefined') {
 
       console.log(`📊 开始处理 ${total} 个好友...`);
 
-      // 批量处理
+      // 分批渲染函数
+      const flushRenderQueue = () => {
+        if (pendingRender.length > 0 && this._uiRenderer) {
+          pendingRender.forEach(review => {
+            this._uiRenderer.appendCard(review);
+          });
+          console.log(`🎨 渲染了 ${pendingRender.length} 篇评测，共 ${reviews.length} 篇`);
+          pendingRender.length = 0; // 清空队列
+        }
+      };
+
+      // 批量处理好友
       for (let i = 0; i < friendIds.length; i += searcher.batchSize) {
         const batch = friendIds.slice(i, i + searcher.batchSize);
 
@@ -3372,12 +3675,14 @@ if (typeof window !== 'undefined') {
           })
         );
 
-        // 收集有效结果并实时渲染
+        // 收集有效结果
         batchResults.filter(r => r !== null).forEach(review => {
           reviews.push(review);
-          // 实时更新UI（逐步显示）
-          if (this._uiRenderer) {
-            this._uiRenderer.appendCard(review);
+          pendingRender.push(review);
+
+          // 每满5篇就渲染一次
+          if (pendingRender.length >= RENDER_BATCH_SIZE) {
+            flushRenderQueue();
           }
         });
 
@@ -3392,7 +3697,10 @@ if (typeof window !== 'undefined') {
         }
       }
 
-      // 隐藏加载状态（因为我们已经逐步渲染了）
+      // 渲染剩余的评测
+      flushRenderQueue();
+
+      // 隐藏加载状态
       if (this._uiRenderer) {
         this._uiRenderer.hideLoading();
       }
@@ -3407,19 +3715,33 @@ if (typeof window !== 'undefined') {
 
     /**
      * 从字典模式获取完整评测数据
+     * 分批渲染：每获取5篇评测立即渲染
      */
     _fetchFullReviews: async function(friendIds, appId) {
       const reviews = [];
+      const pendingRender = []; // 待渲染队列
+      const RENDER_BATCH_SIZE = 5; // 每5篇渲染一次
       const extractor = new ReviewExtractor();
       const total = friendIds.length;
       let current = 0;
 
       console.log(`📥 获取 ${total} 条评测的详细数据...`);
 
-      // 批量获取
-      const batchSize = 5;
-      for (let i = 0; i < friendIds.length; i += batchSize) {
-        const batch = friendIds.slice(i, i + batchSize);
+      // 分批渲染函数
+      const flushRenderQueue = () => {
+        if (pendingRender.length > 0 && this._uiRenderer) {
+          pendingRender.forEach(review => {
+            this._uiRenderer.appendCard(review);
+          });
+          console.log(`🎨 渲染了 ${pendingRender.length} 篇评测，共 ${reviews.length} 篇`);
+          pendingRender.length = 0; // 清空队列
+        }
+      };
+
+      // 批量获取（网络请求批次）
+      const fetchBatchSize = 5;
+      for (let i = 0; i < friendIds.length; i += fetchBatchSize) {
+        const batch = friendIds.slice(i, i + fetchBatchSize);
 
         const batchResults = await Promise.all(
           batch.map(async (steamId) => {
@@ -3444,6 +3766,12 @@ if (typeof window !== 'undefined') {
         // 收集有效结果
         batchResults.filter(r => r !== null).forEach(review => {
           reviews.push(review);
+          pendingRender.push(review);
+
+          // 每满5篇就渲染一次
+          if (pendingRender.length >= RENDER_BATCH_SIZE) {
+            flushRenderQueue();
+          }
         });
 
         current += batch.length;
@@ -3452,9 +3780,17 @@ if (typeof window !== 'undefined') {
         }
 
         // 批次延迟
-        if (i + batchSize < friendIds.length) {
+        if (i + fetchBatchSize < friendIds.length) {
           await new Promise(r => setTimeout(r, 300));
         }
+      }
+
+      // 渲染剩余的评测
+      flushRenderQueue();
+
+      // 隐藏加载状态
+      if (this._uiRenderer) {
+        this._uiRenderer.hideLoading();
       }
 
       return reviews;
@@ -3486,7 +3822,7 @@ if (typeof window !== 'undefined') {
         this._pageDetector = new PageDetector();
       }
 
-      // 初始化UI渲染器（用于显示修复提示）
+      // 初始化UI渲染器
       if (!this._uiRenderer) {
         this._uiRenderer = new UIRenderer();
       }
@@ -3497,26 +3833,30 @@ if (typeof window !== 'undefined') {
 
       // 立即检测当前页面
       this._pageDetector.detectAndTrigger(
-        // onNeedFix: Steam渲染失败，需要FRF修复
+        // onNeedFix: Steam渲染失败，需要FRF自动修复
         (appId) => {
           console.log(`🔧 检测到Steam渲染bug，自动启动FRF修复...`);
-          // 开始渲染（会自动隐藏修复提示）
+          // 隐藏欢迎横幅（开始渲染后不需要了）
+          self._uiRenderer.hideWelcomeBanner();
+          // 开始渲染
           self.renderUI();
         },
-        // onDetecting: 开始检测时立即显示提示
+        // onPageReady: 进入好友评测页面立即显示欢迎横幅和按钮
         (appId) => {
-          console.log(`🔍 检测好友评测页面渲染状态...`);
-          self._uiRenderer.showFixingNotice();
+          console.log(`🚀 FRF 已就绪，App ID: ${appId}`);
+          // 立即显示欢迎横幅
+          self._uiRenderer.showWelcomeBanner();
+          // 立即添加FRF刷新按钮
+          self._uiRenderer.addRefreshButton();
         }
       );
 
       // 监听页面变化（SPA导航）
       this._pageDetector.watchPageChanges((appId) => {
         console.log(`🔧 页面变化，重新检测...`);
-        // 立即显示修复提示
-        self._uiRenderer.showFixingNotice();
-        // 开始渲染
-        self.renderUI();
+        // 显示欢迎横幅和按钮
+        self._uiRenderer.showWelcomeBanner();
+        self._uiRenderer.addRefreshButton();
       });
 
       console.log('👀 FRF 自动检测已启动');
@@ -3525,15 +3865,15 @@ if (typeof window !== 'undefined') {
 
   // 欢迎信息
   console.log('%c========================================', 'color: #47bfff; font-weight: bold;');
-  console.log('%c  🚀 FRF v3.1 已加载', 'color: #47bfff; font-weight: bold; font-size: 16px;');
+  console.log('%c  🚀 FRF v4.1 已加载', 'color: #47bfff; font-weight: bold; font-size: 16px;');
   console.log('%c  Friend Review Finder', 'color: #47bfff;');
-  console.log('%c  自动修复Steam好友评测Bug', 'color: #e91e63; font-weight: bold;');
+  console.log('%c  自动修复Steam好友评测Bug + 分批渲染', 'color: #e91e63; font-weight: bold;');
   console.log('%c========================================', 'color: #47bfff; font-weight: bold;');
   console.log('');
   console.log('📖 输入 %cFRF.help()%c 查看使用说明', 'color: #ff9800; font-weight: bold;', '');
-  console.log('🖥️ UI渲染: %cFRF.renderUI()%c - 渲染好友评测到页面', 'color: #e91e63; font-weight: bold;', '');
+  console.log('🔧 自动修复: 检测bug后自动修复，每5篇渲染一次');
   console.log('🚀 快速模式: %cFRF.quick(appId)%c - 单游戏最新数据', 'color: #ff9800; font-weight: bold;', '');
-  console.log('📚 字典模式: %cFRF.test(appId)%c - 多游戏快速查询', 'color: #4caf50; font-weight: bold;', '');
+  console.log('📚 字典模式: %cFRF.buildDict()%c 构建 → %cFRF.test(appId)%c 查询', 'color: #4caf50; font-weight: bold;', '', 'color: #4caf50; font-weight: bold;', '');
   console.log('');
 
   // 自动启动检测（延迟执行，等待页面加载完成）

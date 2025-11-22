@@ -342,7 +342,7 @@ class UIRenderer {
             </a>
             <div class="frf_author_info">
               <a href="${review.userProfileUrl}" class="frf_author_name">${review.userName}</a>
-              <div class="frf_author_tag">FRF 好友评测</div>
+              <div class="frf_author_tag">${review.hoursAtReview ? `评测时 ${review.hoursAtReview} 小时` : ''}</div>
             </div>
           </div>
           <div class="frf_comment_area">
