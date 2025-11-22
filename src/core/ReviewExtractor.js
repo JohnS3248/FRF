@@ -47,6 +47,7 @@ class ReviewExtractor {
       // 评测信息
       isPositive: this.extractRecommendation(html),
       totalHours: this.extractTotalHours(html),
+      hoursAtReview: this.extractHoursAtReview(html),
       publishDate: this.extractPublishDate(html),
       updateDate: this.extractUpdateDate(html),
 
@@ -374,6 +375,26 @@ class ReviewExtractor {
     }
     this.logger.warn('未能提取游戏时长');
     return '未知';
+  }
+
+  /**
+   * 提取评测时的游戏时长
+   * 格式：（评测时 14.2 小时） 或 (14.2 hrs at review time)
+   */
+  extractHoursAtReview(html) {
+    const patterns = [
+      /（评测时\s*([\d,.]+)\s*小时）/,
+      /\(([\d,.]+)\s*hrs?\s+at\s+review\s+time\)/i
+    ];
+
+    for (const pattern of patterns) {
+      const match = html.match(pattern);
+      if (match) {
+        return match[1].replace(/,/g, '');
+      }
+    }
+
+    return null; // 有些评测可能没有这个信息
   }
 
   extractPublishDate(html) {

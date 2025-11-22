@@ -400,6 +400,20 @@ class ReviewCache {
   }
 
   /**
+   * 添加单条评测记录到缓存（用于快速模式同步）
+   * @param {string} steamId - 好友 Steam ID
+   * @param {string} appId - 游戏 App ID
+   */
+  addReviewToCache(steamId, appId) {
+    if (!this.friendReviewsMap[steamId]) {
+      this.friendReviewsMap[steamId] = [];
+    }
+    if (!this.friendReviewsMap[steamId].includes(appId)) {
+      this.friendReviewsMap[steamId].push(appId);
+    }
+  }
+
+  /**
    * 获取缓存统计信息
    */
   getCacheStats() {

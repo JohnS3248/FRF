@@ -367,6 +367,7 @@ class ReviewExtractor {
       // 评测信息
       isPositive: this.extractRecommendation(html),
       totalHours: this.extractTotalHours(html),
+      hoursAtReview: this.extractHoursAtReview(html),
       publishDate: this.extractPublishDate(html),
       updateDate: this.extractUpdateDate(html),
 
@@ -694,6 +695,26 @@ class ReviewExtractor {
     }
     this.logger.warn('未能提取游戏时长');
     return '未知';
+  }
+
+  /**
+   * 提取评测时的游戏时长
+   * 格式：（评测时 14.2 小时） 或 (14.2 hrs at review time)
+   */
+  extractHoursAtReview(html) {
+    const patterns = [
+      /（评测时\s*([\d,.]+)\s*小时）/,
+      /\(([\d,.]+)\s*hrs?\s+at\s+review\s+time\)/i
+    ];
+
+    for (const pattern of patterns) {
+      const match = html.match(pattern);
+      if (match) {
+        return match[1].replace(/,/g, '');
+      }
+    }
+
+    return null; // 有些评测可能没有这个信息
   }
 
   extractPublishDate(html) {
@@ -1316,6 +1337,20 @@ class ReviewCache {
     localStorage.removeItem(this.cacheKey);
     this.friendReviewsMap = {};
     this.logger.info('缓存已清除');
+  }
+
+  /**
+   * 添加单条评测记录到缓存（用于快速模式同步）
+   * @param {string} steamId - 好友 Steam ID
+   * @param {string} appId - 游戏 App ID
+   */
+  addReviewToCache(steamId, appId) {
+    if (!this.friendReviewsMap[steamId]) {
+      this.friendReviewsMap[steamId] = [];
+    }
+    if (!this.friendReviewsMap[steamId].includes(appId)) {
+      this.friendReviewsMap[steamId].push(appId);
+    }
   }
 
   /**
@@ -2348,7 +2383,7 @@ class UIRenderer {
             </a>
             <div class="frf_author_info">
               <a href="${review.userProfileUrl}" class="frf_author_name">${review.userName}</a>
-              <div class="frf_author_tag">FRF 好友评测</div>
+              <div class="frf_author_tag">${review.hoursAtReview ? `评测时 ${review.hoursAtReview} 小时` : ''}</div>
             </div>
           </div>
           <div class="frf_comment_area">
@@ -3912,17 +3947,22 @@ if (typeof window !== 'undefined') {
 
     /**
      * 将快速模式结果同步到字典缓存
+     * 无论是否有现有缓存，都会保存结果
      */
     _syncQuickResultsToDict: function(reviews, appId) {
       try {
         const cache = new ReviewCache();
-        if (cache.loadFromCache()) {
-          reviews.forEach(review => {
-            cache.addReviewToCache(review.steamId, appId);
-          });
-          cache.saveToCache();
-          console.log(`🔗 已将 ${reviews.length} 条评测同步到字典缓存`);
-        }
+        // 尝试加载现有缓存，如果没有也没关系
+        cache.loadFromCache();
+
+        // 添加新的评测记录
+        reviews.forEach(review => {
+          cache.addReviewToCache(review.steamId, appId);
+        });
+
+        // 保存到缓存
+        cache.saveToCache();
+        console.log(`🔗 已将 ${reviews.length} 条评测同步到字典缓存`);
       } catch (error) {
         console.warn('同步到字典失败:', error);
       }
