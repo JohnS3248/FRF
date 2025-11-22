@@ -1,10 +1,15 @@
 /**
- * FRF - Friend Review Finder v3.0
+ * FRF - Friend Review Finder v4.1
  * 主程序
  *
  * 双模式架构：
- * - 快速模式：单游戏搜索，遍历好友，获取最新数据
- * - 字典模式：构建缓存字典，多游戏快速查询
+ * - 快速模式：单游戏搜索，遍历好友，获取最新数据（默认）
+ * - 字典模式：利用已有缓存快速查询（需先构建字典）
+ *
+ * v4.1 新增：
+ * - 分批渲染：每找到5篇评测立即渲染，提升用户体验
+ * - 字典优先：有缓存时优先使用字典模式
+ * - 字典初始化独立：buildDict 作为独立功能，不自动触发
  */
 
 class FriendReviewFinder {
@@ -168,17 +173,108 @@ if (typeof window !== 'undefined') {
   // 全局辅助对象
   window.FRF = {
     /**
-     * 快速测试
+     * 字典模式查询（仅在有缓存时工作）
+     * 不会自动构建字典，需要先调用 FRF.buildDict()
      */
     test: async function(appId) {
       console.log(`%c========================================`, 'color: #47bfff; font-weight: bold;');
-      console.log(`%c  🎮 测试游戏 App ID: ${appId}`, 'color: #47bfff; font-weight: bold; font-size: 14px;');
+      console.log(`%c  📚 字典模式查询 - 游戏 ${appId}`, 'color: #47bfff; font-weight: bold; font-size: 14px;');
       console.log(`%c========================================`, 'color: #47bfff; font-weight: bold;');
       console.log('');
 
+      const cache = new ReviewCache();
+      const cacheLoaded = cache.loadFromCache();
+
+      if (!cacheLoaded) {
+        console.log('%c❌ 字典缓存不存在！', 'color: #ff5722; font-weight: bold;');
+        console.log('');
+        console.log('💡 字典模式需要先构建字典缓存：');
+        console.log('   %cFRF.buildDict()%c - 构建字典（耗时1-3分钟，但只需执行一次）', 'color: #ff9800; font-weight: bold;', '');
+        console.log('');
+        console.log('🚀 或使用快速模式直接查询：');
+        console.log('   %cFRF.quick(' + appId + ')%c - 快速搜索此游戏', 'color: #ff9800; font-weight: bold;', '');
+        return null;
+      }
+
+      // 查询游戏
+      const matchedFriends = cache.findFriendsWithReview(String(appId));
+
+      if (matchedFriends.length === 0) {
+        console.log('😢 字典中没有此游戏的好友评测记录');
+        console.log('');
+        console.log('💡 可能原因：');
+        console.log('   1. 你的好友没有评测过这款游戏');
+        console.log('   2. 字典构建后有新的好友评测了这款游戏');
+        console.log('');
+        console.log('🚀 使用快速模式获取最新数据：');
+        console.log('   %cFRF.quick(' + appId + ')%c', 'color: #ff9800; font-weight: bold;', '');
+        return [];
+      }
+
+      console.log(`🎯 找到 ${matchedFriends.length} 个好友评测了这款游戏`);
+      console.log('');
+
+      // 获取详细数据
       const finder = new FriendReviewFinder(appId);
-      await finder.fetchReviews();
+      finder.cache = cache;
+      const steamAPI = new SteamAPI(appId);
+      finder.reviews = await steamAPI.batchGetReviews(matchedFriends, (current, total, found) => {
+        if (current % 5 === 0 || current === total) {
+          console.log(`📊 进度: ${current}/${total}`);
+        }
+      });
+
+      finder.showResults();
+      window.frfReviews = finder.reviews;
+      console.log('💾 评测数据已保存到 window.frfReviews');
+
       return finder;
+    },
+
+    /**
+     * 构建字典缓存（独立功能，耗时较长）
+     * 这是一个隐藏功能，将在后续添加到设置页面
+     */
+    buildDict: async function() {
+      console.log('%c========================================', 'color: #4caf50; font-weight: bold;');
+      console.log('%c  📚 构建字典缓存', 'color: #4caf50; font-weight: bold; font-size: 14px;');
+      console.log('%c========================================', 'color: #4caf50; font-weight: bold;');
+      console.log('');
+      console.log('%c⚠️ 注意：此过程需要 1-3 分钟，但只需执行一次', 'color: #ff9800;');
+      console.log('   构建完成后，字典模式查询将秒速完成');
+      console.log('');
+
+      const cache = new ReviewCache();
+      const steamAPI = new SteamAPI('0');
+
+      // 检查是否有未完成的构建
+      const savedProgress = cache.loadBuildProgress();
+      if (savedProgress) {
+        console.log(`📋 发现未完成的构建进度 (${savedProgress.processedCount}/${savedProgress.friendIds.length})`);
+        console.log('   使用 %cFRF.resumeBuild()%c 继续构建', 'color: #ff9800; font-weight: bold;', '');
+        console.log('   使用 %cFRF.clearProgress()%c 清除进度重新开始', 'color: #ff9800; font-weight: bold;', '');
+        return;
+      }
+
+      console.log('📥 获取好友列表...');
+      const friends = await steamAPI.getFriendsList();
+      console.log(`✅ 找到 ${friends.length} 个好友`);
+      console.log('');
+
+      window.frfCache = cache; // 保存实例以支持暂停/继续
+
+      await cache.buildCache(friends, (current, total, built) => {
+        if (current % 10 === 0 || current === total) {
+          const percent = Math.round(current / total * 100);
+          console.log(`📊 进度: ${current}/${total} (${percent}%) - 已收录 ${built} 篇评测`);
+        }
+      });
+
+      console.log('');
+      console.log('%c✅ 字典构建完成！', 'color: #4caf50; font-weight: bold;');
+      console.log('');
+      console.log('💡 现在可以使用字典模式快速查询：');
+      console.log('   %cFRF.test(appId)%c - 秒速查询任意游戏', 'color: #4caf50; font-weight: bold;', '');
     },
 
     /**
@@ -355,17 +451,21 @@ if (typeof window !== 'undefined') {
      */
     help: function() {
       console.log('%c========================================', 'color: #47bfff; font-weight: bold;');
-      console.log('%c  📖 FRF v3.0 使用指南', 'color: #47bfff; font-weight: bold; font-size: 16px;');
+      console.log('%c  📖 FRF v4.1 使用指南', 'color: #47bfff; font-weight: bold; font-size: 16px;');
       console.log('%c========================================', 'color: #47bfff; font-weight: bold;');
       console.log('');
-      console.log('%c🚀 快速模式（推荐）:', 'color: #ff9800; font-weight: bold;');
+      console.log('%c🔧 自动修复（默认）:', 'color: #9c27b0; font-weight: bold;');
+      console.log('  FRF会自动检测Steam好友评测页面的渲染bug');
+      console.log('  检测到bug后自动修复，支持分批渲染（每5篇显示一次）');
+      console.log('');
+      console.log('%c🚀 快速模式:', 'color: #ff9800; font-weight: bold;');
       console.log('  FRF.quick(appId)     - 单游戏快速搜索');
       console.log('  FRF.pause()          - 暂停搜索');
       console.log('  FRF.resume()         - 继续搜索');
       console.log('');
       console.log('%c📚 字典模式:', 'color: #4caf50; font-weight: bold;');
-      console.log('  FRF.test(appId)      - 字典模式查询');
-      console.log('  FRF.refresh()        - 构建/刷新字典');
+      console.log('  FRF.buildDict()      - 构建字典（首次需要1-3分钟）');
+      console.log('  FRF.test(appId)      - 字典模式查询（需先构建）');
       console.log('  FRF.pauseBuild()     - 暂停构建');
       console.log('  FRF.resumeBuild()    - 继续构建');
       console.log('  FRF.stats()          - 查看缓存统计');
@@ -380,13 +480,10 @@ if (typeof window !== 'undefined') {
       console.log('  FRF.clearProgress()  - 清除构建进度');
       console.log('  FRF.setDebug(true)   - 开启调试模式');
       console.log('');
-      console.log('%c💡 模式对比:', 'color: #2196f3;');
-      console.log('  快速模式: 单游戏，最新数据，遍历好友，约42秒');
-      console.log('  字典模式: 多游戏，缓存查询，需先构建字典');
-      console.log('');
-      console.log('%c🔧 自动修复:', 'color: #9c27b0;');
-      console.log('  FRF会自动检测Steam好友评测页面的渲染bug');
-      console.log('  如果检测到bug，会自动获取并渲染好友评测');
+      console.log('%c💡 模式说明:', 'color: #2196f3;');
+      console.log('  自动修复: 优先使用字典缓存，无缓存则使用快速模式');
+      console.log('  快速模式: 单游戏，最新数据，约42秒');
+      console.log('  字典模式: 多游戏秒速查询，需先构建字典');
       console.log('');
     },
 
@@ -459,42 +556,50 @@ if (typeof window !== 'undefined') {
 
     /**
      * 为UI获取评测数据（智能选择模式）
+     * 优先级：字典缓存 > 快速模式
+     *
      * @param {string} appId - 游戏ID
-     * @param {boolean} forceRefresh - 是否强制刷新
+     * @param {boolean} forceRefresh - 是否强制刷新（忽略缓存）
      * @returns {Promise<Array>} 评测数据数组（完整版）
      */
     _fetchReviewsForUI: async function(appId, forceRefresh) {
       const cache = new ReviewCache();
+
+      // 强制刷新时直接使用快速模式
+      if (forceRefresh) {
+        console.log('🔄 强制刷新，使用快速模式...');
+        return await this._fetchReviewsQuickMode(appId);
+      }
+
+      // 检查字典缓存
       const cacheLoaded = cache.loadFromCache();
 
-      // 检查字典缓存中是否有这个游戏
-      let useQuickMode = forceRefresh || !cacheLoaded;
-
-      if (cacheLoaded && !forceRefresh) {
+      if (cacheLoaded) {
         const matchedFriends = cache.findFriendsWithReview(appId);
         if (matchedFriends.length > 0) {
           console.log(`📚 字典命中！找到 ${matchedFriends.length} 个好友评测`);
-          useQuickMode = false;
-
-          // 使用字典模式：获取详细数据
+          // 使用字典模式：分批获取详细数据
           return await this._fetchFullReviews(matchedFriends, appId);
         } else {
           console.log('📚 字典中无此游戏记录，切换到快速模式');
-          useQuickMode = true;
         }
+      } else {
+        console.log('📚 无字典缓存，使用快速模式');
       }
 
-      if (useQuickMode) {
-        console.log('🚀 使用快速模式获取数据...');
-        return await this._fetchReviewsQuickMode(appId);
-      }
+      // 使用快速模式
+      console.log('🚀 使用快速模式获取数据...');
+      return await this._fetchReviewsQuickMode(appId);
     },
 
     /**
      * 快速模式获取完整评测数据（用于UI）
+     * 分批渲染：每找到5篇评测立即渲染
      */
     _fetchReviewsQuickMode: async function(appId) {
       const reviews = [];
+      const pendingRender = []; // 待渲染队列
+      const RENDER_BATCH_SIZE = 5; // 每5篇渲染一次
       const extractor = new ReviewExtractor();
 
       const searcher = new QuickSearcher(appId);
@@ -508,7 +613,18 @@ if (typeof window !== 'undefined') {
 
       console.log(`📊 开始处理 ${total} 个好友...`);
 
-      // 批量处理
+      // 分批渲染函数
+      const flushRenderQueue = () => {
+        if (pendingRender.length > 0 && this._uiRenderer) {
+          pendingRender.forEach(review => {
+            this._uiRenderer.appendCard(review);
+          });
+          console.log(`🎨 渲染了 ${pendingRender.length} 篇评测，共 ${reviews.length} 篇`);
+          pendingRender.length = 0; // 清空队列
+        }
+      };
+
+      // 批量处理好友
       for (let i = 0; i < friendIds.length; i += searcher.batchSize) {
         const batch = friendIds.slice(i, i + searcher.batchSize);
 
@@ -529,12 +645,14 @@ if (typeof window !== 'undefined') {
           })
         );
 
-        // 收集有效结果并实时渲染
+        // 收集有效结果
         batchResults.filter(r => r !== null).forEach(review => {
           reviews.push(review);
-          // 实时更新UI（逐步显示）
-          if (this._uiRenderer) {
-            this._uiRenderer.appendCard(review);
+          pendingRender.push(review);
+
+          // 每满5篇就渲染一次
+          if (pendingRender.length >= RENDER_BATCH_SIZE) {
+            flushRenderQueue();
           }
         });
 
@@ -549,7 +667,10 @@ if (typeof window !== 'undefined') {
         }
       }
 
-      // 隐藏加载状态（因为我们已经逐步渲染了）
+      // 渲染剩余的评测
+      flushRenderQueue();
+
+      // 隐藏加载状态
       if (this._uiRenderer) {
         this._uiRenderer.hideLoading();
       }
@@ -564,19 +685,33 @@ if (typeof window !== 'undefined') {
 
     /**
      * 从字典模式获取完整评测数据
+     * 分批渲染：每获取5篇评测立即渲染
      */
     _fetchFullReviews: async function(friendIds, appId) {
       const reviews = [];
+      const pendingRender = []; // 待渲染队列
+      const RENDER_BATCH_SIZE = 5; // 每5篇渲染一次
       const extractor = new ReviewExtractor();
       const total = friendIds.length;
       let current = 0;
 
       console.log(`📥 获取 ${total} 条评测的详细数据...`);
 
-      // 批量获取
-      const batchSize = 5;
-      for (let i = 0; i < friendIds.length; i += batchSize) {
-        const batch = friendIds.slice(i, i + batchSize);
+      // 分批渲染函数
+      const flushRenderQueue = () => {
+        if (pendingRender.length > 0 && this._uiRenderer) {
+          pendingRender.forEach(review => {
+            this._uiRenderer.appendCard(review);
+          });
+          console.log(`🎨 渲染了 ${pendingRender.length} 篇评测，共 ${reviews.length} 篇`);
+          pendingRender.length = 0; // 清空队列
+        }
+      };
+
+      // 批量获取（网络请求批次）
+      const fetchBatchSize = 5;
+      for (let i = 0; i < friendIds.length; i += fetchBatchSize) {
+        const batch = friendIds.slice(i, i + fetchBatchSize);
 
         const batchResults = await Promise.all(
           batch.map(async (steamId) => {
@@ -601,6 +736,12 @@ if (typeof window !== 'undefined') {
         // 收集有效结果
         batchResults.filter(r => r !== null).forEach(review => {
           reviews.push(review);
+          pendingRender.push(review);
+
+          // 每满5篇就渲染一次
+          if (pendingRender.length >= RENDER_BATCH_SIZE) {
+            flushRenderQueue();
+          }
         });
 
         current += batch.length;
@@ -609,9 +750,17 @@ if (typeof window !== 'undefined') {
         }
 
         // 批次延迟
-        if (i + batchSize < friendIds.length) {
+        if (i + fetchBatchSize < friendIds.length) {
           await new Promise(r => setTimeout(r, 300));
         }
+      }
+
+      // 渲染剩余的评测
+      flushRenderQueue();
+
+      // 隐藏加载状态
+      if (this._uiRenderer) {
+        this._uiRenderer.hideLoading();
       }
 
       return reviews;
@@ -682,15 +831,15 @@ if (typeof window !== 'undefined') {
 
   // 欢迎信息
   console.log('%c========================================', 'color: #47bfff; font-weight: bold;');
-  console.log('%c  🚀 FRF v3.1 已加载', 'color: #47bfff; font-weight: bold; font-size: 16px;');
+  console.log('%c  🚀 FRF v4.1 已加载', 'color: #47bfff; font-weight: bold; font-size: 16px;');
   console.log('%c  Friend Review Finder', 'color: #47bfff;');
-  console.log('%c  自动修复Steam好友评测Bug', 'color: #e91e63; font-weight: bold;');
+  console.log('%c  自动修复Steam好友评测Bug + 分批渲染', 'color: #e91e63; font-weight: bold;');
   console.log('%c========================================', 'color: #47bfff; font-weight: bold;');
   console.log('');
   console.log('📖 输入 %cFRF.help()%c 查看使用说明', 'color: #ff9800; font-weight: bold;', '');
-  console.log('🖥️ UI渲染: %cFRF.renderUI()%c - 渲染好友评测到页面', 'color: #e91e63; font-weight: bold;', '');
+  console.log('🔧 自动修复: 检测bug后自动修复，每5篇渲染一次');
   console.log('🚀 快速模式: %cFRF.quick(appId)%c - 单游戏最新数据', 'color: #ff9800; font-weight: bold;', '');
-  console.log('📚 字典模式: %cFRF.test(appId)%c - 多游戏快速查询', 'color: #4caf50; font-weight: bold;', '');
+  console.log('📚 字典模式: %cFRF.buildDict()%c 构建 → %cFRF.test(appId)%c 查询', 'color: #4caf50; font-weight: bold;', '', 'color: #4caf50; font-weight: bold;', '');
   console.log('');
 
   // 自动启动检测（延迟执行，等待页面加载完成）
