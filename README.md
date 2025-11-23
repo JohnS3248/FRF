@@ -8,6 +8,8 @@
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Greasy Fork](https://img.shields.io/badge/Greasy%20Fork-即将发布-orange.svg)](https://greasyfork.org/)
 
+**[中文](#中文) | [English](#english)**
+
 修复 Steam 好友评测页面的随机不正常渲染问题，并且可以自定义完整显示所有好友的游戏评测
 
 </div>
@@ -19,8 +21,6 @@
 <div align="center">
 
 安装后无需任何操作，FRF 会自动工作：访问 Steam 游戏的好友评测页面 → 自动检测 → 自动修复并显示
-
-**[中文](#中文) | [English](#english)**
 
 </div>
 
