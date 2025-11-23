@@ -108,6 +108,7 @@ class SettingsPanel {
           <!-- 显示设置 -->
           <div class="frf_settings_section">
             <h3>显示设置</h3>
+            <p class="frf_section_desc">显示设置保存后刷新页面即可生效。FRF 刷新按钮是对当前游戏的所有好友评测进行重新检测。</p>
             <div class="frf_settings_row frf_settings_row_vertical">
               <div class="frf_row_header">
                 <label for="frf_render_batch">每次渲染评测数</label>
@@ -142,12 +143,15 @@ class SettingsPanel {
           <!-- 缓存管理 -->
           <div class="frf_settings_section">
             <h3>缓存管理</h3>
+            <p class="frf_section_desc">FRF 会缓存好友的评测数据，避免每次访问游戏页面都重新搜索。缓存自动构建，7 天后过期。</p>
             <div class="frf_settings_info" id="frf_cache_info">
               <div class="frf_info_loading">正在加载缓存信息...</div>
             </div>
             <div class="frf_settings_actions">
               <button class="frf_btn frf_btn_danger" id="frf_clear_cache">清除缓存</button>
-              <button class="frf_btn frf_btn_secondary" id="frf_refresh_stats">刷新统计</button>
+              <button class="frf_btn frf_btn_secondary" id="frf_export_cache">导出缓存</button>
+              <button class="frf_btn frf_btn_secondary" id="frf_import_cache">导入缓存</button>
+              <input type="file" id="frf_import_file" accept=".json" style="display: none;">
             </div>
           </div>
 
@@ -246,9 +250,19 @@ class SettingsPanel {
       this.clearCache();
     });
 
-    // 刷新统计
-    this.panelElement.querySelector('#frf_refresh_stats').addEventListener('click', () => {
-      this.loadCacheStats();
+    // 导出缓存
+    this.panelElement.querySelector('#frf_export_cache').addEventListener('click', () => {
+      this.exportCache();
+    });
+
+    // 导入缓存
+    this.panelElement.querySelector('#frf_import_cache').addEventListener('click', () => {
+      this.panelElement.querySelector('#frf_import_file').click();
+    });
+
+    this.panelElement.querySelector('#frf_import_file').addEventListener('change', (e) => {
+      this.importCache(e.target.files[0]);
+      e.target.value = ''; // 重置，允许重复选择同一文件
     });
 
     // 保存设置
@@ -474,6 +488,177 @@ class SettingsPanel {
         this.showToast('清除缓存失败: ' + error.message, 'error');
       }
     }
+  }
+
+  /**
+   * 导出缓存为 JSON 文件
+   */
+  exportCache() {
+    try {
+      const cacheKey = `${Constants.CACHE_KEY_PREFIX}review_dict_${Constants.CACHE_VERSION}`;
+      const cached = localStorage.getItem(cacheKey);
+
+      if (!cached) {
+        this.showToast('没有可导出的缓存数据', 'error');
+        return;
+      }
+
+      const cacheData = JSON.parse(cached);
+
+      // 添加导出元信息
+      const exportData = {
+        exportTime: new Date().toISOString(),
+        frfVersion: Constants.VERSION,
+        cacheVersion: cacheData.version,
+        cacheTimestamp: cacheData.timestamp,
+        friendsCount: Object.keys(cacheData.data).length,
+        totalReviews: Object.values(cacheData.data).reduce((sum, arr) => sum + arr.length, 0),
+        data: cacheData.data
+      };
+
+      // 生成文件名
+      const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const filename = `frf_cache_${date}.json`;
+
+      // 创建下载
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      this.showToast(`缓存已导出: ${filename}`, 'success');
+      this.logger.info('缓存已导出', { filename, friendsCount: exportData.friendsCount });
+
+    } catch (error) {
+      this.showToast('导出缓存失败: ' + error.message, 'error');
+      this.logger.error('导出缓存失败', error);
+    }
+  }
+
+  /**
+   * 从 JSON 文件导入缓存
+   * @param {File} file - 要导入的 JSON 文件
+   */
+  importCache(file) {
+    if (!file) return;
+
+    const reader = new FileReader();
+
+    reader.onload = (e) => {
+      try {
+        const importData = JSON.parse(e.target.result);
+
+        // 验证导入数据格式
+        if (!importData.data || typeof importData.data !== 'object') {
+          this.showToast('无效的缓存文件格式', 'error');
+          return;
+        }
+
+        // 验证数据结构：data 应该是 { steamId: [appId, ...] } 格式
+        const steamIds = Object.keys(importData.data);
+        if (steamIds.length === 0) {
+          this.showToast('缓存文件中没有数据', 'error');
+          return;
+        }
+
+        // 简单验证第一个条目的格式
+        const firstEntry = importData.data[steamIds[0]];
+        if (!Array.isArray(firstEntry)) {
+          this.showToast('无效的缓存数据结构', 'error');
+          return;
+        }
+
+        // 询问用户导入模式
+        const hasExistingCache = localStorage.getItem(`${Constants.CACHE_KEY_PREFIX}review_dict_${Constants.CACHE_VERSION}`);
+        let importMode = 'replace'; // 默认替换
+
+        if (hasExistingCache) {
+          const choice = confirm(
+            `检测到已有缓存数据。\n\n` +
+            `导入文件包含 ${steamIds.length} 个好友的数据。\n\n` +
+            `点击"确定"：合并数据（保留现有 + 添加新数据）\n` +
+            `点击"取消"：替换数据（清空现有，使用导入数据）`
+          );
+          importMode = choice ? 'merge' : 'replace';
+        }
+
+        // 执行导入
+        const cacheKey = `${Constants.CACHE_KEY_PREFIX}review_dict_${Constants.CACHE_VERSION}`;
+
+        if (importMode === 'merge') {
+          // 合并模式：加载现有缓存，合并新数据
+          const existingRaw = localStorage.getItem(cacheKey);
+          let existingData = {};
+
+          if (existingRaw) {
+            const existing = JSON.parse(existingRaw);
+            existingData = existing.data || {};
+          }
+
+          // 合并数据
+          let addedFriends = 0;
+          let addedReviews = 0;
+
+          for (const [steamId, appIds] of Object.entries(importData.data)) {
+            if (!existingData[steamId]) {
+              existingData[steamId] = [];
+              addedFriends++;
+            }
+
+            for (const appId of appIds) {
+              if (!existingData[steamId].includes(appId)) {
+                existingData[steamId].push(appId);
+                addedReviews++;
+              }
+            }
+          }
+
+          // 保存合并后的数据
+          const mergedCache = {
+            version: Constants.CACHE_VERSION,
+            timestamp: Date.now(),
+            data: existingData
+          };
+
+          localStorage.setItem(cacheKey, JSON.stringify(mergedCache));
+
+          this.showToast(`合并成功：+${addedFriends} 好友，+${addedReviews} 条记录`, 'success');
+          this.logger.info('缓存合并导入完成', { addedFriends, addedReviews });
+
+        } else {
+          // 替换模式：直接使用导入数据
+          const newCache = {
+            version: Constants.CACHE_VERSION,
+            timestamp: importData.cacheTimestamp || Date.now(),
+            data: importData.data
+          };
+
+          localStorage.setItem(cacheKey, JSON.stringify(newCache));
+
+          const totalReviews = Object.values(importData.data).reduce((sum, arr) => sum + arr.length, 0);
+          this.showToast(`导入成功：${steamIds.length} 好友，${totalReviews} 条记录`, 'success');
+          this.logger.info('缓存替换导入完成', { friendsCount: steamIds.length, totalReviews });
+        }
+
+        // 刷新统计显示
+        this.loadCacheStats();
+
+      } catch (error) {
+        this.showToast('导入失败: ' + error.message, 'error');
+        this.logger.error('导入缓存失败', error);
+      }
+    };
+
+    reader.onerror = () => {
+      this.showToast('读取文件失败', 'error');
+    };
+
+    reader.readAsText(file);
   }
 
   /**
@@ -768,6 +953,13 @@ class SettingsPanel {
         color: #67c1f5;
         text-transform: uppercase;
         letter-spacing: 0.5px;
+      }
+
+      .frf_section_desc {
+        margin: 0 0 12px 0;
+        font-size: 12px;
+        color: #8f98a0;
+        line-height: 1.5;
       }
 
       /* 设置行 */
