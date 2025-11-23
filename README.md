@@ -8,7 +8,7 @@
 
 [![Version](https://img.shields.io/badge/version-5.1.6-blue.svg)](https://github.com/JohnS3248/FRF/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Greasy Fork](https://img.shields.io/badge/Greasy%20Fork-即将发布-orange.svg)](https://greasyfork.org/)
+[![Greasy Fork](https://img.shields.io/greasyfork/v/556679?label=Greasy%20Fork)](https://greasyfork.org/zh-CN/scripts/556679)
 
 **[中文](#中文) | [English](#english)**
 
@@ -72,7 +72,7 @@ FRF 还可以改变steam来自好友的评测的官方渲染,脚本的渲染相�
 
 **方式一：从 Greasy Fork 安装（推荐）**
 
-即将发布，敬请期待...
+[点击安装 - Greasy Fork](https://greasyfork.org/zh-CN/scripts/556679)
 
 **方式二：手动安装**
 
@@ -222,7 +222,7 @@ If you haven't installed a userscript manager, please install one of the followi
 
 **Option 1: Install from Greasy Fork (Recommended)**
 
-Coming soon...
+[Click to Install - Greasy Fork](https://greasyfork.org/zh-CN/scripts/556679)
 
 **Option 2: Manual Install**
 
@@ -336,4 +336,4 @@ MIT License - See [LICENSE](LICENSE)
 
 - [GitHub Repository](https://github.com/JohnS3248/FRF)
 - [Issue Tracker](https://github.com/JohnS3248/FRF/issues)
-- Greasy Fork (Coming soon)
+- [Greasy Fork](https://greasyfork.org/zh-CN/scripts/556679)
