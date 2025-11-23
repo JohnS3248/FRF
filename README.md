@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="./icon/FRFicon.png" alt="FRF Icon" width="128">
+
 # FRF - Friend Review Finder
 
 **Steam 好友评测修复工具** | **Steam Friend Reviews Fixer**

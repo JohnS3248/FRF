@@ -114,7 +114,7 @@ ${combinedCode}
 // @author       JohnS3248
 // @match        https://steamcommunity.com/app/*/reviews/*
 // @match        https://steamcommunity.com/app/*
-// @icon         https://store.steampowered.com/favicon.ico
+// @icon         https://raw.githubusercontent.com/JohnS3248/FRF/main/icon/FRFicon.png
 // @grant        GM_addStyle
 // @grant        GM_getValue
 // @grant        GM_setValue
