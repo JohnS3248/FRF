@@ -180,18 +180,35 @@ A: 可能原因：
 
 ### What is this?
 
-FRF is a userscript that fixes the long-standing friend reviews display issue on Steam Community.
-
 When you see "XX friends recommend this game" on Steam store and click "View all friend reviews", you often encounter:
-- HTTP 500 error
-- Blank page with no reviews loading
-- Only partial friend reviews showing
+- Page shows dark blue background, reviews don't load
+- Some pages work fine while others don't - the issue is very random
 
 **FRF fixes these issues and displays all your friends' reviews for the game.**
+- FRF proactively finds and renders your friends' reviews
+- FRF's rendering is better than Steam's official one, showing publish date, update date, hours at review time, etc.
+- FRF has customizable settings - choose custom text truncation or show full content
+- FRF can even refresh pages where Steam's official rendering works (only for "Friends" filter)
+
+### Other Features
+
+FRF allows you to customize the preview character count for each friend's review card. Default is 300. You can adjust this freely based on your preference. Set it to "0" to show full content, so you don't need to click each review to see details.
+
+<p align="center">
+  <img src="./assets/gifs/取消好友评测截断.gif" alt="Disable truncation demo" width="700">
+</p>
+
+FRF can also replace Steam's official friend review rendering. The script's rendering shows more comprehensive information than Steam.
+
+<p align="center">
+  <img src="./assets/gifs/改变原有的评测显示.gif" alt="Replace rendering demo" width="700">
+</p>
 
 ### Installation
 
 #### Step 1: Install a Userscript Manager
+
+If you haven't installed a userscript manager, please install one of the following extensions:
 
 | Browser | Recommended Extension |
 |---------|----------------------|
@@ -209,24 +226,16 @@ Coming soon...
 
 1. Open [dist/steam-friend-reviews-fixer.user.js](dist/steam-friend-reviews-fixer.user.js)
 2. Click the "Raw" button
-3. Your userscript manager will prompt for installation
+3. Your userscript manager will prompt for installation, click "Install"
 
-### How to Use
-
-#### Automatic Mode (Recommended)
-
-No action needed after installation:
-
-1. Visit any Steam game's friend reviews page
-2. FRF automatically detects page status
-3. If Steam rendering fails, FRF auto-fixes and displays friend reviews
-
-#### Manual Refresh
+### Manual Refresh
 
 Two buttons appear at the top of the page:
 
 - **FRF Refresh**: Re-scan all friends' reviews (ignores cache)
 - **FRF Settings**: Open settings panel
+
+Click "FRF Refresh" to force fetch the latest data.
 
 ### Features
 
@@ -239,12 +248,14 @@ Two buttons appear at the top of the page:
 
 #### Settings Panel
 
+Click "FRF Settings" to open the settings panel:
+
 **General Settings**
 
 | Option | Description | Default |
 |--------|-------------|---------|
 | Reviews per render | Display after finding N reviews | 3 |
-| Content truncate length | Max characters to show (0 = full) | 300 |
+| Content truncate length | Max characters to show (0 = no truncation) | 300 |
 | Background update | Auto-check for new reviews | On |
 
 **Cache Management**
@@ -252,8 +263,28 @@ Two buttons appear at the top of the page:
 | Action | Description |
 |--------|-------------|
 | Clear Cache | Delete all cached data |
-| Export Cache | Download JSON backup |
-| Import Cache | Restore from backup |
+| Export Cache | Download JSON backup file |
+| Import Cache | Restore from backup file |
+
+**Advanced Settings** (usually no need to modify)
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| Batch size | Number of concurrent friend requests | 30 |
+| Batch delay | Wait time between batches | 0ms |
+| Debug mode | Show detailed logs in console | Off |
+
+### How it Works
+
+FRF bypasses Steam's rendering bug by fetching data directly from each friend's personal review page:
+
+```
+1. Get your Steam friends list
+2. Concurrently check if each friend reviewed the current game
+3. Extract review details (recommendation, playtime, content, etc.)
+4. Render review cards in Steam style
+5. Cache results locally for instant loading next time
+```
 
 ### Console Commands (Advanced)
 
@@ -270,17 +301,24 @@ FRF.openSettings()   // Open settings panel
 
 ### FAQ
 
-**Q: Why is the first load so slow?**
+**Q: Why is the first load so slow? How long does it take?**
 
-A: First load scans all friends for reviews (~42s for 229 friends). Subsequent visits use cache for instant loading.
+A: First load scans all friends for reviews. Testing shows 229 friends takes 40-50 seconds. Subsequent visits use cache for instant loading.
 
-**Q: How to force refresh?**
+**Q: How to force refresh data?**
 
-A: Click "FRF Refresh" button or run `FRF.renderUI(true)` in console.
+A: Click "FRF Refresh" button on the page, or run `FRF.renderUI(true)` in console.
 
 **Q: Where is cache stored?**
 
-A: In browser's localStorage, local to current device. Use "Export Cache" to backup.
+A: In browser's localStorage, local to current device only. Use "Export Cache" to backup.
+
+**Q: Why are some friends' reviews not showing?**
+
+A: Possible reasons:
+- Friend's review is set to private
+- Friend deleted the review
+- Cache expired, click "FRF Refresh" to re-fetch
 
 ### Feedback
 
