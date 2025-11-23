@@ -2,7 +2,7 @@
 // @name         Steam 好友评测修复工具
 // @name:en      Steam Friend Reviews Fixer
 // @namespace    https://github.com/JohnS3248/FRF
-// @version      5.1.1
+// @version      5.1.3
 // @description  自动修复 Steam 好友评测页面渲染 Bug，显示完整的好友评测列表
 // @description:en Auto-fix Steam friend reviews rendering bug, display complete friend review list
 // @author       JohnS3248
@@ -31,7 +31,7 @@
 
 const Constants = {
   // ==================== 版本信息 ====================
-  VERSION: '5.1.1',
+  VERSION: '5.1.3',
   CACHE_VERSION: 'v2', // 渐进式缓存版本
 
   // ==================== 请求配置 ====================
@@ -3136,15 +3136,15 @@ class SettingsPanel {
           <div class="frf_stats_grid">
             <div class="frf_stat_item">
               <span class="frf_stat_value">${stats.friendsWithReviews}</span>
-              <span class="frf_stat_label">缓存好友数</span>
+              <span class="frf_stat_label">有评测的好友</span>
             </div>
             <div class="frf_stat_item">
               <span class="frf_stat_value">${stats.totalReviews}</span>
-              <span class="frf_stat_label">总评测记录</span>
+              <span class="frf_stat_label">缓存的游戏数</span>
             </div>
             <div class="frf_stat_item">
               <span class="frf_stat_value">${stats.cacheAge || '-'}</span>
-              <span class="frf_stat_label">缓存时间 (小时)</span>
+              <span class="frf_stat_label">距上次更新 (小时)</span>
             </div>
           </div>
         `;

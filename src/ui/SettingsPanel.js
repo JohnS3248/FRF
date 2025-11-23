@@ -310,15 +310,15 @@ class SettingsPanel {
           <div class="frf_stats_grid">
             <div class="frf_stat_item">
               <span class="frf_stat_value">${stats.friendsWithReviews}</span>
-              <span class="frf_stat_label">缓存好友数</span>
+              <span class="frf_stat_label">有评测的好友</span>
             </div>
             <div class="frf_stat_item">
               <span class="frf_stat_value">${stats.totalReviews}</span>
-              <span class="frf_stat_label">总评测记录</span>
+              <span class="frf_stat_label">缓存的游戏数</span>
             </div>
             <div class="frf_stat_item">
               <span class="frf_stat_value">${stats.cacheAge || '-'}</span>
-              <span class="frf_stat_label">缓存时间 (小时)</span>
+              <span class="frf_stat_label">距上次更新 (小时)</span>
             </div>
           </div>
         `;
