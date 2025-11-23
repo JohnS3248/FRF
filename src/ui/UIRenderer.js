@@ -315,8 +315,9 @@ class UIRenderer {
     const recommendText = review.isPositive ? '推荐' : '不推荐';
 
     // 截断过长的评测内容（安全截断，避免破坏HTML标签）
-    // 从设置读取截断长度，默认300
-    const maxContentLength = (window.FRF && window.FRF._uiConfig && window.FRF._uiConfig.contentTruncate) || 300;
+    // 从设置读取截断长度，默认300；设为0表示不截断
+    const uiConfig = window.FRF && window.FRF._uiConfig;
+    const maxContentLength = (uiConfig && typeof uiConfig.contentTruncate === 'number') ? uiConfig.contentTruncate : 300;
     let displayContent = this.safeHTMLTruncate(review.reviewContent || '', maxContentLength);
 
     // 格式化有价值/欢乐人数（如果都为0则不显示）
@@ -549,6 +550,9 @@ class UIRenderer {
    */
   safeHTMLTruncate(html, maxLength) {
     if (!html) return '';
+
+    // maxLength 为 0 表示不截断，直接返回原内容
+    if (maxLength === 0) return html;
 
     // 先统计纯文本长度（不含HTML标签）
     const textContent = html.replace(/<[^>]*>/g, '');
