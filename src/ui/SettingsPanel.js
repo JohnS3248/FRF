@@ -108,34 +108,34 @@ class SettingsPanel {
           <!-- 显示设置 -->
           <div class="frf_settings_section">
             <h3>显示设置</h3>
-            <div class="frf_settings_row">
-              <label for="frf_render_batch">每次渲染评测数</label>
-              <div class="frf_input_group">
+            <div class="frf_settings_row frf_settings_row_vertical">
+              <div class="frf_row_header">
+                <label for="frf_render_batch">每次渲染评测数</label>
                 <input type="number" id="frf_render_batch" min="1" max="20" value="3">
-                <span class="frf_input_hint">找到几篇后开始显示（推荐 3）</span>
               </div>
+              <span class="frf_input_desc">找到多少篇好友评测后开始显示，推荐值为 3</span>
             </div>
-            <div class="frf_settings_row">
-              <label for="frf_content_truncate">评测内容截断长度</label>
-              <div class="frf_input_group">
-                <input type="number" id="frf_content_truncate" min="50" max="1000" value="300">
-                <span class="frf_input_hint">字符数（推荐 300）</span>
+            <div class="frf_settings_row frf_settings_row_vertical">
+              <div class="frf_row_header">
+                <label for="frf_content_truncate">评测内容截断长度</label>
+                <input type="number" id="frf_content_truncate" min="0" max="8000" value="300">
               </div>
+              <span class="frf_input_desc">评测内容显示的最大字符数，设为 0 表示不截断（显示全部内容），推荐值为 300</span>
             </div>
           </div>
 
           <!-- 性能设置 -->
           <div class="frf_settings_section">
             <h3>性能设置</h3>
-            <div class="frf_settings_row">
-              <label for="frf_background_update">后台静默更新</label>
-              <div class="frf_toggle_group">
+            <div class="frf_settings_row frf_settings_row_vertical">
+              <div class="frf_row_header">
+                <label for="frf_background_update">后台静默更新</label>
                 <label class="frf_toggle">
                   <input type="checkbox" id="frf_background_update" checked>
                   <span class="frf_toggle_slider"></span>
                 </label>
-                <span class="frf_input_hint">缓存加载后自动检查更新</span>
               </div>
+              <span class="frf_input_desc">启用后，从缓存加载评测时会在后台自动检查是否有新的好友评测</span>
             </div>
           </div>
 
@@ -175,44 +175,44 @@ class SettingsPanel {
           <!-- 快速模式配置 -->
           <div class="frf_settings_section">
             <h3>快速模式配置</h3>
-            <div class="frf_settings_row">
-              <label for="frf_batch_size">批次大小</label>
-              <div class="frf_input_group">
+            <div class="frf_settings_row frf_settings_row_vertical">
+              <div class="frf_row_header">
+                <label for="frf_batch_size">批次大小</label>
                 <input type="number" id="frf_batch_size" min="1" max="50" value="30">
-                <span class="frf_input_hint">并发请求数（推荐 30）</span>
               </div>
+              <span class="frf_input_desc">每次并发请求的好友数量，推荐值为 30</span>
             </div>
-            <div class="frf_settings_row">
-              <label for="frf_delay">批次延迟</label>
-              <div class="frf_input_group">
+            <div class="frf_settings_row frf_settings_row_vertical">
+              <div class="frf_row_header">
+                <label for="frf_delay">批次延迟</label>
                 <input type="number" id="frf_delay" min="0" max="5000" value="0">
-                <span class="frf_input_hint">毫秒（推荐 0）</span>
               </div>
+              <span class="frf_input_desc">每批请求之间的等待时间（毫秒），推荐值为 0</span>
             </div>
           </div>
 
           <!-- 调试选项 -->
           <div class="frf_settings_section">
             <h3>调试选项</h3>
-            <div class="frf_settings_row">
-              <label for="frf_debug_mode">调试模式</label>
-              <div class="frf_toggle_group">
+            <div class="frf_settings_row frf_settings_row_vertical">
+              <div class="frf_row_header">
+                <label for="frf_debug_mode">调试模式</label>
                 <label class="frf_toggle">
                   <input type="checkbox" id="frf_debug_mode">
                   <span class="frf_toggle_slider"></span>
                 </label>
-                <span class="frf_input_hint">显示详细日志</span>
               </div>
+              <span class="frf_input_desc">在浏览器控制台显示详细的运行日志</span>
             </div>
-            <div class="frf_settings_row">
-              <label for="frf_quick_debug">快速模式调试</label>
-              <div class="frf_toggle_group">
+            <div class="frf_settings_row frf_settings_row_vertical">
+              <div class="frf_row_header">
+                <label for="frf_quick_debug">快速模式调试</label>
                 <label class="frf_toggle">
                   <input type="checkbox" id="frf_quick_debug">
                   <span class="frf_toggle_slider"></span>
                 </label>
-                <span class="frf_input_hint">显示每个请求的响应时间</span>
               </div>
+              <span class="frf_input_desc">显示每个请求的响应时间，用于性能调优</span>
             </div>
           </div>
         </div>
@@ -345,7 +345,7 @@ class SettingsPanel {
 
     // 常规设置
     this.panelElement.querySelector('#frf_render_batch').value = settings.renderBatch || 3;
-    this.panelElement.querySelector('#frf_content_truncate').value = settings.contentTruncate || 300;
+    this.panelElement.querySelector('#frf_content_truncate').value = typeof settings.contentTruncate === 'number' ? settings.contentTruncate : 300;
     this.panelElement.querySelector('#frf_background_update').checked = settings.backgroundUpdate !== false; // 默认开启
 
     // 高级设置
@@ -391,8 +391,8 @@ class SettingsPanel {
       return;
     }
 
-    if (contentTruncate < 50 || contentTruncate > 1000) {
-      this.showToast('截断长度必须在 50-1000 之间', 'error');
+    if (contentTruncate < 0 || contentTruncate > 8000) {
+      this.showToast('截断长度必须在 0-8000 之间', 'error');
       return;
     }
 
@@ -520,7 +520,7 @@ class SettingsPanel {
       // 常规设置
       window.FRF._uiConfig = {
         renderBatch: settings.renderBatch || 3,
-        contentTruncate: settings.contentTruncate || 300,
+        contentTruncate: typeof settings.contentTruncate === 'number' ? settings.contentTruncate : 300,
         backgroundUpdate: settings.backgroundUpdate !== false
       };
 
@@ -788,7 +788,50 @@ class SettingsPanel {
         font-size: 13px;
       }
 
-      /* 输入组 */
+      /* 垂直布局设置行（新样式） */
+      .frf_settings_row_vertical {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 6px;
+        padding: 12px 0;
+      }
+
+      .frf_row_header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .frf_row_header > label {
+        color: #c6d4df;
+        font-size: 13px;
+        font-weight: 500;
+      }
+
+      .frf_row_header input[type="number"] {
+        width: 80px;
+        padding: 6px 10px;
+        background: rgba(0, 0, 0, 0.3);
+        border: 1px solid #4a6278;
+        border-radius: 3px;
+        color: #fff;
+        font-size: 13px;
+        text-align: center;
+      }
+
+      .frf_row_header input[type="number"]:focus {
+        outline: none;
+        border-color: #67c1f5;
+      }
+
+      .frf_input_desc {
+        font-size: 12px;
+        color: #8f98a0;
+        line-height: 1.4;
+        padding-left: 2px;
+      }
+
+      /* 输入组（保留兼容） */
       .frf_input_group {
         display: flex;
         align-items: center;
