@@ -1889,8 +1889,9 @@ class UIRenderer {
     const recommendText = review.isPositive ? '推荐' : '不推荐';
 
     // 截断过长的评测内容（安全截断，避免破坏HTML标签）
-    // 从设置读取截断长度，默认300
-    const maxContentLength = (window.FRF && window.FRF._uiConfig && window.FRF._uiConfig.contentTruncate) || 300;
+    // 从设置读取截断长度，默认300；设为0表示不截断
+    const uiConfig = window.FRF && window.FRF._uiConfig;
+    const maxContentLength = (uiConfig && typeof uiConfig.contentTruncate === 'number') ? uiConfig.contentTruncate : 300;
     let displayContent = this.safeHTMLTruncate(review.reviewContent || '', maxContentLength);
 
     // 格式化有价值/欢乐人数（如果都为0则不显示）
@@ -2123,6 +2124,9 @@ class UIRenderer {
    */
   safeHTMLTruncate(html, maxLength) {
     if (!html) return '';
+
+    // maxLength 为 0 表示不截断，直接返回原内容
+    if (maxLength === 0) return html;
 
     // 先统计纯文本长度（不含HTML标签）
     const textContent = html.replace(/<[^>]*>/g, '');
@@ -3136,15 +3140,15 @@ class SettingsPanel {
           <div class="frf_stats_grid">
             <div class="frf_stat_item">
               <span class="frf_stat_value">${stats.friendsWithReviews}</span>
-              <span class="frf_stat_label">缓存好友数</span>
+              <span class="frf_stat_label">有评测的好友</span>
             </div>
             <div class="frf_stat_item">
               <span class="frf_stat_value">${stats.totalReviews}</span>
-              <span class="frf_stat_label">总评测记录</span>
+              <span class="frf_stat_label">缓存的游戏数</span>
             </div>
             <div class="frf_stat_item">
               <span class="frf_stat_value">${stats.cacheAge || '-'}</span>
-              <span class="frf_stat_label">缓存时间 (小时)</span>
+              <span class="frf_stat_label">距上次更新 (小时)</span>
             </div>
           </div>
         `;
@@ -3171,7 +3175,7 @@ class SettingsPanel {
 
     // 常规设置
     this.panelElement.querySelector('#frf_render_batch').value = settings.renderBatch || 3;
-    this.panelElement.querySelector('#frf_content_truncate').value = settings.contentTruncate || 300;
+    this.panelElement.querySelector('#frf_content_truncate').value = typeof settings.contentTruncate === 'number' ? settings.contentTruncate : 300;
     this.panelElement.querySelector('#frf_background_update').checked = settings.backgroundUpdate !== false; // 默认开启
 
     // 高级设置
@@ -3346,7 +3350,7 @@ class SettingsPanel {
       // 常规设置
       window.FRF._uiConfig = {
         renderBatch: settings.renderBatch || 3,
-        contentTruncate: settings.contentTruncate || 300,
+        contentTruncate: typeof settings.contentTruncate === 'number' ? settings.contentTruncate : 300,
         backgroundUpdate: settings.backgroundUpdate !== false
       };
 
