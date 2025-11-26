@@ -125,21 +125,6 @@ class SettingsPanel {
             </div>
           </div>
 
-          <!-- 性能设置 -->
-          <div class="frf_settings_section">
-            <h3>性能设置</h3>
-            <div class="frf_settings_row frf_settings_row_vertical">
-              <div class="frf_row_header">
-                <label for="frf_background_update">后台静默更新</label>
-                <label class="frf_toggle">
-                  <input type="checkbox" id="frf_background_update" checked>
-                  <span class="frf_toggle_slider"></span>
-                </label>
-              </div>
-              <span class="frf_input_desc">启用后，从缓存加载评测时会在后台自动检查是否有新的好友评测</span>
-            </div>
-          </div>
-
           <!-- 缓存管理 -->
           <div class="frf_settings_section">
             <h3>缓存管理</h3>
@@ -191,7 +176,7 @@ class SettingsPanel {
                 <label for="frf_delay">批次延迟</label>
                 <input type="number" id="frf_delay" min="0" max="5000" value="0">
               </div>
-              <span class="frf_input_desc">每批请求之间的等待时间（毫秒），推荐值为 0</span>
+              <span class="frf_input_desc">每批请求之间的等待时间（毫秒），推荐值为 50</span>
             </div>
           </div>
 
@@ -360,7 +345,6 @@ class SettingsPanel {
     // 常规设置
     this.panelElement.querySelector('#frf_render_batch').value = settings.renderBatch || 3;
     this.panelElement.querySelector('#frf_content_truncate').value = typeof settings.contentTruncate === 'number' ? settings.contentTruncate : 300;
-    this.panelElement.querySelector('#frf_background_update').checked = settings.backgroundUpdate !== false; // 默认开启
 
     // 高级设置
     if (window.FRF && window.FRF._quickConfig) {
@@ -391,7 +375,6 @@ class SettingsPanel {
     // 常规设置
     const renderBatch = parseInt(this.panelElement.querySelector('#frf_render_batch').value, 10);
     const contentTruncate = parseInt(this.panelElement.querySelector('#frf_content_truncate').value, 10);
-    const backgroundUpdate = this.panelElement.querySelector('#frf_background_update').checked;
 
     // 高级设置
     const batchSize = parseInt(this.panelElement.querySelector('#frf_batch_size').value, 10);
@@ -434,8 +417,7 @@ class SettingsPanel {
       // 常规设置（存储到 FRF 对象）
       window.FRF._uiConfig = {
         renderBatch,
-        contentTruncate,
-        backgroundUpdate
+        contentTruncate
       };
     }
 
@@ -444,7 +426,6 @@ class SettingsPanel {
       // 常规
       renderBatch,
       contentTruncate,
-      backgroundUpdate,
       // 高级
       batchSize,
       delay,
@@ -453,7 +434,7 @@ class SettingsPanel {
     });
 
     this.showToast('设置已保存', 'success');
-    this.logger.info('设置已保存', { renderBatch, contentTruncate, backgroundUpdate, batchSize, delay, debugMode, quickDebug });
+    this.logger.info('设置已保存', { renderBatch, contentTruncate, batchSize, delay, debugMode, quickDebug });
   }
 
   /**
@@ -463,11 +444,10 @@ class SettingsPanel {
     // 常规设置默认值
     this.panelElement.querySelector('#frf_render_batch').value = 3;
     this.panelElement.querySelector('#frf_content_truncate').value = 300;
-    this.panelElement.querySelector('#frf_background_update').checked = true;
 
     // 高级设置默认值
     this.panelElement.querySelector('#frf_batch_size').value = 30;
-    this.panelElement.querySelector('#frf_delay').value = 0;
+    this.panelElement.querySelector('#frf_delay').value = 50;
     this.panelElement.querySelector('#frf_debug_mode').checked = false;
     this.panelElement.querySelector('#frf_quick_debug').checked = false;
 
@@ -705,8 +685,7 @@ class SettingsPanel {
       // 常规设置
       window.FRF._uiConfig = {
         renderBatch: settings.renderBatch || 3,
-        contentTruncate: typeof settings.contentTruncate === 'number' ? settings.contentTruncate : 300,
-        backgroundUpdate: settings.backgroundUpdate !== false
+        contentTruncate: typeof settings.contentTruncate === 'number' ? settings.contentTruncate : 300
       };
 
       this.logger.info('已应用保存的设置', settings);

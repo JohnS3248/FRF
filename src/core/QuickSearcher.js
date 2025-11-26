@@ -21,9 +21,9 @@ class QuickSearcher {
     this.logger = new Logger('QuickSearcher');
     this.extractor = new ReviewExtractor();
 
-    // 配置参数（已优化：基于实测数据）
-    this.batchSize = 30;        // 每批并发数（测试最优值）
-    this.delay = 0;             // 批次间延迟（ms）（无延迟最快）
+    // 配置参数（已优化：基于限流研究）
+    this.batchSize = 30;        // 每批并发数
+    this.delay = 50;            // 批次间延迟（ms）
     this.debugMode = false;     // 调试模式
 
     // 状态
@@ -181,11 +181,14 @@ class QuickSearcher {
    *
    * @param {string} steamId - 好友 Steam ID
    * @param {boolean} returnRaw - 是否返回原始数据（包含HTML）
+   * @param {number} retryCount - 当前重试次数（内部使用）
    * @returns {Promise<Object|null>} 评测数据或 null
    */
-  async checkFriendReview(steamId, returnRaw = false) {
+  async checkFriendReview(steamId, returnRaw = false, retryCount = 0) {
     const url = `https://steamcommunity.com/profiles/${steamId}/recommended/${this.appId}/`;
     const startTime = Date.now();
+    const maxRetries = 3;        // 最大重试次数
+    const retryDelay = 10000;    // 重试等待时间（10秒）
 
     try {
       const response = await fetch(url, {
@@ -195,9 +198,25 @@ class QuickSearcher {
 
       const elapsed = Date.now() - startTime;
 
+      // 429 限流处理：等待后重试
+      if (response.status === 429) {
+        if (retryCount < maxRetries) {
+          if (this.debugMode) {
+            console.log(`[DEBUG] ${steamId} | 429 限流，等待 ${retryDelay/1000}s 后重试 (${retryCount + 1}/${maxRetries})`);
+          }
+          await this.sleep(retryDelay);
+          return this.checkFriendReview(steamId, returnRaw, retryCount + 1);
+        } else {
+          if (this.debugMode) {
+            console.log(`[DEBUG] ${steamId} | 429 限流，已达最大重试次数`);
+          }
+          return null;
+        }
+      }
+
       if (!response.ok) {
         if (this.debugMode) {
-          console.log(`[DEBUG] ${steamId} | not ok | ${elapsed}ms`);
+          console.log(`[DEBUG] ${steamId} | not ok (${response.status}) | ${elapsed}ms`);
         }
         return null;
       }

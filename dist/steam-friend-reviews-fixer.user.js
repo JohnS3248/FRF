@@ -1018,9 +1018,9 @@ class QuickSearcher {
     this.logger = new Logger('QuickSearcher');
     this.extractor = new ReviewExtractor();
 
-    // 配置参数（已优化：基于实测数据）
-    this.batchSize = 30;        // 每批并发数（测试最优值）
-    this.delay = 0;             // 批次间延迟（ms）（无延迟最快）
+    // 配置参数（已优化：基于限流研究）
+    this.batchSize = 30;        // 每批并发数
+    this.delay = 50;            // 批次间延迟（ms）
     this.debugMode = false;     // 调试模式
 
     // 状态
@@ -1178,11 +1178,14 @@ class QuickSearcher {
    *
    * @param {string} steamId - 好友 Steam ID
    * @param {boolean} returnRaw - 是否返回原始数据（包含HTML）
+   * @param {number} retryCount - 当前重试次数（内部使用）
    * @returns {Promise<Object|null>} 评测数据或 null
    */
-  async checkFriendReview(steamId, returnRaw = false) {
+  async checkFriendReview(steamId, returnRaw = false, retryCount = 0) {
     const url = `https://steamcommunity.com/profiles/${steamId}/recommended/${this.appId}/`;
     const startTime = Date.now();
+    const maxRetries = 3;        // 最大重试次数
+    const retryDelay = 10000;    // 重试等待时间（10秒）
 
     try {
       const response = await fetch(url, {
@@ -1192,9 +1195,25 @@ class QuickSearcher {
 
       const elapsed = Date.now() - startTime;
 
+      // 429 限流处理：等待后重试
+      if (response.status === 429) {
+        if (retryCount < maxRetries) {
+          if (this.debugMode) {
+            console.log(`[DEBUG] ${steamId} | 429 限流，等待 ${retryDelay/1000}s 后重试 (${retryCount + 1}/${maxRetries})`);
+          }
+          await this.sleep(retryDelay);
+          return this.checkFriendReview(steamId, returnRaw, retryCount + 1);
+        } else {
+          if (this.debugMode) {
+            console.log(`[DEBUG] ${steamId} | 429 限流，已达最大重试次数`);
+          }
+          return null;
+        }
+      }
+
       if (!response.ok) {
         if (this.debugMode) {
-          console.log(`[DEBUG] ${steamId} | not ok | ${elapsed}ms`);
+          console.log(`[DEBUG] ${steamId} | not ok (${response.status}) | ${elapsed}ms`);
         }
         return null;
       }
@@ -3059,21 +3078,6 @@ class SettingsPanel {
             </div>
           </div>
 
-          <!-- 性能设置 -->
-          <div class="frf_settings_section">
-            <h3>性能设置</h3>
-            <div class="frf_settings_row frf_settings_row_vertical">
-              <div class="frf_row_header">
-                <label for="frf_background_update">后台静默更新</label>
-                <label class="frf_toggle">
-                  <input type="checkbox" id="frf_background_update" checked>
-                  <span class="frf_toggle_slider"></span>
-                </label>
-              </div>
-              <span class="frf_input_desc">启用后，从缓存加载评测时会在后台自动检查是否有新的好友评测</span>
-            </div>
-          </div>
-
           <!-- 缓存管理 -->
           <div class="frf_settings_section">
             <h3>缓存管理</h3>
@@ -3125,7 +3129,7 @@ class SettingsPanel {
                 <label for="frf_delay">批次延迟</label>
                 <input type="number" id="frf_delay" min="0" max="5000" value="0">
               </div>
-              <span class="frf_input_desc">每批请求之间的等待时间（毫秒），推荐值为 0</span>
+              <span class="frf_input_desc">每批请求之间的等待时间（毫秒），推荐值为 50</span>
             </div>
           </div>
 
@@ -3294,7 +3298,6 @@ class SettingsPanel {
     // 常规设置
     this.panelElement.querySelector('#frf_render_batch').value = settings.renderBatch || 3;
     this.panelElement.querySelector('#frf_content_truncate').value = typeof settings.contentTruncate === 'number' ? settings.contentTruncate : 300;
-    this.panelElement.querySelector('#frf_background_update').checked = settings.backgroundUpdate !== false; // 默认开启
 
     // 高级设置
     if (window.FRF && window.FRF._quickConfig) {
@@ -3325,7 +3328,6 @@ class SettingsPanel {
     // 常规设置
     const renderBatch = parseInt(this.panelElement.querySelector('#frf_render_batch').value, 10);
     const contentTruncate = parseInt(this.panelElement.querySelector('#frf_content_truncate').value, 10);
-    const backgroundUpdate = this.panelElement.querySelector('#frf_background_update').checked;
 
     // 高级设置
     const batchSize = parseInt(this.panelElement.querySelector('#frf_batch_size').value, 10);
@@ -3368,8 +3370,7 @@ class SettingsPanel {
       // 常规设置（存储到 FRF 对象）
       window.FRF._uiConfig = {
         renderBatch,
-        contentTruncate,
-        backgroundUpdate
+        contentTruncate
       };
     }
 
@@ -3378,7 +3379,6 @@ class SettingsPanel {
       // 常规
       renderBatch,
       contentTruncate,
-      backgroundUpdate,
       // 高级
       batchSize,
       delay,
@@ -3387,7 +3387,7 @@ class SettingsPanel {
     });
 
     this.showToast('设置已保存', 'success');
-    this.logger.info('设置已保存', { renderBatch, contentTruncate, backgroundUpdate, batchSize, delay, debugMode, quickDebug });
+    this.logger.info('设置已保存', { renderBatch, contentTruncate, batchSize, delay, debugMode, quickDebug });
   }
 
   /**
@@ -3397,11 +3397,10 @@ class SettingsPanel {
     // 常规设置默认值
     this.panelElement.querySelector('#frf_render_batch').value = 3;
     this.panelElement.querySelector('#frf_content_truncate').value = 300;
-    this.panelElement.querySelector('#frf_background_update').checked = true;
 
     // 高级设置默认值
     this.panelElement.querySelector('#frf_batch_size').value = 30;
-    this.panelElement.querySelector('#frf_delay').value = 0;
+    this.panelElement.querySelector('#frf_delay').value = 50;
     this.panelElement.querySelector('#frf_debug_mode').checked = false;
     this.panelElement.querySelector('#frf_quick_debug').checked = false;
 
@@ -3639,8 +3638,7 @@ class SettingsPanel {
       // 常规设置
       window.FRF._uiConfig = {
         renderBatch: settings.renderBatch || 3,
-        contentTruncate: typeof settings.contentTruncate === 'number' ? settings.contentTruncate : 300,
-        backgroundUpdate: settings.backgroundUpdate !== false
+        contentTruncate: typeof settings.contentTruncate === 'number' ? settings.contentTruncate : 300
       };
 
       this.logger.info('已应用保存的设置', settings);
@@ -4241,7 +4239,7 @@ if (typeof window !== 'undefined') {
  * 智能缓存架构：
  * - 快速模式：单游戏搜索，遍历好友，获取最新数据
  * - 渐进式缓存：快速搜索结果自动同步到缓存
- * - 后台更新：缓存命中时先显示，后台静默检查更新
+ * - 429限流处理：遇到限流自动等待重试
  *
  * v5.0 改进：
  * - 移除废弃的 FriendReviewFinder 类
@@ -4380,10 +4378,10 @@ if (typeof window !== 'undefined') {
     /**
      * 快速模式 - 单游戏搜索
      */
-    // 快速模式配置（已优化：基于实测数据）
+    // 快速模式配置（已优化：基于限流研究）
     _quickConfig: {
       batchSize: 30,
-      delay: 0,
+      delay: 50,
       debug: false
     },
 
@@ -4595,9 +4593,6 @@ if (typeof window !== 'undefined') {
           // 使用缓存数据：分批获取详细数据
           const cachedReviews = await this._fetchFullReviews(matchedFriends, appId);
 
-          // 启动后台静默更新
-          this._backgroundUpdate(appId, cachedReviews);
-
           return cachedReviews;
         } else {
           console.log('📚 缓存中无此游戏记录，切换到快速模式');
@@ -4611,137 +4606,6 @@ if (typeof window !== 'undefined') {
       return await this._fetchReviewsQuickMode(appId);
     },
 
-    /**
-     * 后台静默更新
-     * 在缓存加载完成后，后台运行快速搜索检查是否有数据改动
-     *
-     * @param {string} appId - 游戏ID
-     * @param {Array} cachedReviews - 缓存中的评测数据
-     */
-    _backgroundUpdate: async function(appId, cachedReviews) {
-      console.log('🔄 后台静默更新启动...');
-
-      try {
-        // 后台执行快速搜索（静默模式，不渲染）
-        const freshSteamIds = await this._quickScanForSteamIds(appId);
-
-        // 比较差异
-        const cachedSteamIds = cachedReviews.map(r => r.steamId);
-        const diff = this._compareReviewSets(cachedSteamIds, freshSteamIds);
-
-        if (diff.hasChanges) {
-          console.log(`🔔 后台更新发现数据改动: +${diff.added.length} -${diff.removed.length}`);
-          // 显示更新提示
-          this._showUpdateNotice(diff);
-
-          // 同步缓存：添加新评测，移除已删除的评测
-          const cache = new ReviewCache();
-          cache.loadFromCache();
-
-          // 添加新发现的评测
-          diff.added.forEach(steamId => {
-            cache.addReviewToCache(steamId, appId);
-          });
-
-          // 移除已删除的评测
-          diff.removed.forEach(steamId => {
-            cache.removeReviewFromCache(steamId, appId);
-          });
-
-          cache.saveToCache();
-          console.log(`🔗 缓存已更新: +${diff.added.length} -${diff.removed.length}`);
-        } else {
-          console.log('✅ 后台更新完成，数据无改动');
-        }
-      } catch (error) {
-        console.warn('后台更新失败:', error);
-      }
-    },
-
-    /**
-     * 快速扫描获取Steam IDs（不获取详细数据，只检查哪些好友有评测）
-     * 用于后台更新时快速比对
-     *
-     * @param {string} appId - 游戏ID
-     * @returns {Promise<Array<string>>} 有评测的好友Steam ID列表
-     */
-    _quickScanForSteamIds: async function(appId) {
-      const searcher = new QuickSearcher(appId);
-      searcher.batchSize = this._quickConfig.batchSize;
-      searcher.delay = this._quickConfig.delay;
-
-      const friendIds = await searcher.fetchFriendIds();
-      const steamIdsWithReview = [];
-
-      // 批量检查（不获取详细内容）
-      for (let i = 0; i < friendIds.length; i += searcher.batchSize) {
-        const batch = friendIds.slice(i, i + searcher.batchSize);
-
-        const results = await Promise.all(
-          batch.map(async (steamId) => {
-            try {
-              const result = await searcher.checkFriendReview(steamId, false);
-              return result ? steamId : null;
-            } catch {
-              return null;
-            }
-          })
-        );
-
-        results.filter(id => id !== null).forEach(id => {
-          steamIdsWithReview.push(id);
-        });
-
-        // 批次延迟
-        if (searcher.delay > 0 && i + searcher.batchSize < friendIds.length) {
-          await new Promise(r => setTimeout(r, searcher.delay));
-        }
-      }
-
-      return steamIdsWithReview;
-    },
-
-    /**
-     * 比较两组评测数据，找出差异
-     *
-     * @param {Array<string>} cachedIds - 缓存中的Steam ID列表
-     * @param {Array<string>} freshIds - 最新的Steam ID列表
-     * @returns {Object} 差异信息 { hasChanges, added, removed }
-     */
-    _compareReviewSets: function(cachedIds, freshIds) {
-      const cachedSet = new Set(cachedIds);
-      const freshSet = new Set(freshIds);
-
-      const added = freshIds.filter(id => !cachedSet.has(id));
-      const removed = cachedIds.filter(id => !freshSet.has(id));
-
-      return {
-        hasChanges: added.length > 0 || removed.length > 0,
-        added,
-        removed
-      };
-    },
-
-    /**
-     * 显示数据更新提示
-     *
-     * @param {Object} diff - 差异信息
-     */
-    _showUpdateNotice: function(diff) {
-      if (!this._uiRenderer) return;
-
-      // 构建提示消息
-      let message = '发现数据改动';
-      if (diff.added.length > 0 && diff.removed.length > 0) {
-        message = `发现数据改动（+${diff.added.length} 新增，-${diff.removed.length} 移除）`;
-      } else if (diff.added.length > 0) {
-        message = `发现 ${diff.added.length} 条新评测`;
-      } else if (diff.removed.length > 0) {
-        message = `有 ${diff.removed.length} 条评测已不可用`;
-      }
-
-      this._uiRenderer.showUpdateNotice(message);
-    },
 
     /**
      * 快速模式获取完整评测数据（用于UI）
@@ -5007,7 +4871,6 @@ if (typeof window !== 'undefined') {
   console.log('');
   console.log('📖 输入 %cFRF.help()%c 查看使用说明', 'color: #ff9800; font-weight: bold;', '');
   console.log('🔧 智能缓存: 首次搜索后自动缓存，下次秒加载');
-  console.log('🔄 后台更新: 缓存加载后自动检查数据改动');
   console.log('');
 
   // 自动启动检测（延迟执行，等待页面加载完成）

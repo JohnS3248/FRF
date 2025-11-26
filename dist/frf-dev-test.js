@@ -1,6 +1,6 @@
 
 /**
- * FRF v5.1.1 - 开发测试版本
+ * FRF v5.1.7 - 开发测试版本
  * 智能缓存 + 设置面板
  *
  * 使用方法：
@@ -35,7 +35,7 @@
 
 const Constants = {
   // ==================== 版本信息 ====================
-  VERSION: '5.1.1',
+  VERSION: '5.1.7',
   CACHE_VERSION: 'v2', // 渐进式缓存版本
 
   // ==================== 请求配置 ====================
@@ -362,6 +362,9 @@ class ReviewExtractor {
    * @returns {Object} 完整评测数据对象
    */
   extractFull(html, steamId, appId) {
+    // 提取头像和头像框
+    const avatarData = this.extractUserAvatar(html);
+
     const reviewData = {
       // 基础信息
       steamId,
@@ -376,7 +379,8 @@ class ReviewExtractor {
       updateDate: this.extractUpdateDate(html),
 
       // 用户信息（新增）
-      userAvatar: this.extractUserAvatar(html),
+      userAvatar: avatarData.avatarUrl,
+      avatarFrame: avatarData.frameUrl,
       userName: this.extractUserName(html),
       userProfileUrl: this.extractUserProfileUrl(html, steamId),
 
@@ -395,6 +399,7 @@ class ReviewExtractor {
       steamId,
       userName: reviewData.userName,
       isPositive: reviewData.isPositive,
+      hasFrame: !!reviewData.avatarFrame,
       contentLength: reviewData.reviewContent?.length || 0
     });
 
@@ -404,11 +409,76 @@ class ReviewExtractor {
   // ==================== 用户信息提取 ====================
 
   /**
-   * 提取用户头像URL
+   * 提取用户头像URL和头像框URL
+   * 使用 DOMParser 精确提取，避免并发时的头像串位问题
+   * @returns {Object} { avatarUrl: string|null, frameUrl: string|null }
    */
   extractUserAvatar(html) {
-    // 从 profile_small_header_avatar 区域提取头像
-    // <img src="https://avatars.fastly.steamstatic.com/xxx_medium.jpg">
+    // 使用 DOMParser 精确提取头像和头像框
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, 'text/html');
+
+      const playerAvatarContainer = doc.querySelector('.profile_small_header_avatar .playerAvatar');
+
+      if (playerAvatarContainer) {
+        let avatarUrl = null;
+        let frameUrl = null;
+
+        // 遍历容器的所有 img 子元素
+        const images = playerAvatarContainer.querySelectorAll('img');
+
+        for (const img of images) {
+          const src = img.getAttribute('src');
+
+          // 提取头像框图片（在 .profile_avatar_frame 内）
+          if (img.closest('.profile_avatar_frame')) {
+            if (src) {
+              frameUrl = src;
+              this.logger.debug('提取头像框:', src);
+            }
+            continue;
+          }
+
+          // 提取真实头像URL（包含 avatars 路径）
+          if (src && src.includes('avatars')) {
+            avatarUrl = src;
+            this.logger.debug('提取头像:', src);
+          }
+        }
+
+        if (avatarUrl) {
+          return { avatarUrl, frameUrl };
+        }
+      }
+
+      // 备用方案：直接查找图片
+      const allImages = doc.querySelectorAll('.profile_small_header_avatar img');
+      let avatarUrl = null;
+      let frameUrl = null;
+
+      for (const img of allImages) {
+        const src = img.getAttribute('src');
+
+        if (img.closest('.profile_avatar_frame')) {
+          if (src) frameUrl = src;
+          continue;
+        }
+
+        if (src && src.includes('avatars')) {
+          avatarUrl = src;
+        }
+      }
+
+      if (avatarUrl) {
+        this.logger.debug('DOMParser 提取成功（备用方案）');
+        return { avatarUrl, frameUrl };
+      }
+    } catch (e) {
+      this.logger.warn('DOMParser 提取头像失败，fallback 到正则', e);
+    }
+
+    // Fallback: 使用正则（兼容旧环境，不提取头像框）
     const patterns = [
       /profile_small_header_avatar[\s\S]*?<img[^>]*src="([^"]+_medium\.jpg)"/,
       /profile_small_header_avatar[\s\S]*?<img[^>]*src="([^"]+\.jpg)"/,
@@ -418,12 +488,13 @@ class ReviewExtractor {
     for (const pattern of patterns) {
       const match = html.match(pattern);
       if (match) {
-        return match[1];
+        this.logger.debug('正则提取头像成功');
+        return { avatarUrl: match[1], frameUrl: null };
       }
     }
 
     this.logger.warn('未能提取用户头像');
-    return null;
+    return { avatarUrl: null, frameUrl: null };
   }
 
   /**
@@ -951,9 +1022,9 @@ class QuickSearcher {
     this.logger = new Logger('QuickSearcher');
     this.extractor = new ReviewExtractor();
 
-    // 配置参数（已优化：基于实测数据）
-    this.batchSize = 30;        // 每批并发数（测试最优值）
-    this.delay = 0;             // 批次间延迟（ms）（无延迟最快）
+    // 配置参数（已优化：基于限流研究）
+    this.batchSize = 30;        // 每批并发数
+    this.delay = 50;            // 批次间延迟（ms）
     this.debugMode = false;     // 调试模式
 
     // 状态
@@ -1111,11 +1182,14 @@ class QuickSearcher {
    *
    * @param {string} steamId - 好友 Steam ID
    * @param {boolean} returnRaw - 是否返回原始数据（包含HTML）
+   * @param {number} retryCount - 当前重试次数（内部使用）
    * @returns {Promise<Object|null>} 评测数据或 null
    */
-  async checkFriendReview(steamId, returnRaw = false) {
+  async checkFriendReview(steamId, returnRaw = false, retryCount = 0) {
     const url = `https://steamcommunity.com/profiles/${steamId}/recommended/${this.appId}/`;
     const startTime = Date.now();
+    const maxRetries = 3;        // 最大重试次数
+    const retryDelay = 10000;    // 重试等待时间（10秒）
 
     try {
       const response = await fetch(url, {
@@ -1125,9 +1199,25 @@ class QuickSearcher {
 
       const elapsed = Date.now() - startTime;
 
+      // 429 限流处理：等待后重试
+      if (response.status === 429) {
+        if (retryCount < maxRetries) {
+          if (this.debugMode) {
+            console.log(`[DEBUG] ${steamId} | 429 限流，等待 ${retryDelay/1000}s 后重试 (${retryCount + 1}/${maxRetries})`);
+          }
+          await this.sleep(retryDelay);
+          return this.checkFriendReview(steamId, returnRaw, retryCount + 1);
+        } else {
+          if (this.debugMode) {
+            console.log(`[DEBUG] ${steamId} | 429 限流，已达最大重试次数`);
+          }
+          return null;
+        }
+      }
+
       if (!response.ok) {
         if (this.debugMode) {
-          console.log(`[DEBUG] ${steamId} | not ok | ${elapsed}ms`);
+          console.log(`[DEBUG] ${steamId} | not ok (${response.status}) | ${elapsed}ms`);
         }
         return null;
       }
@@ -1932,6 +2022,24 @@ class UIRenderer {
     const avatarUrl = review.userAvatar ||
       'https://avatars.fastly.steamstatic.com/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_medium.jpg';
 
+    // 头像框（如果有）
+    const avatarFrameUrl = review.avatarFrame;
+
+    // 构建头像HTML（支持头像框）
+    let avatarHtml = '';
+    if (avatarFrameUrl) {
+      // 有头像框：使用双层结构
+      avatarHtml = `
+        <div class="frf_avatar_container">
+          <img src="${avatarUrl}" class="frf_avatar_img">
+          <img src="${avatarFrameUrl}" class="frf_avatar_frame">
+        </div>
+      `;
+    } else {
+      // 无头像框：普通单层头像
+      avatarHtml = `<img src="${avatarUrl}" class="frf_avatar_img">`;
+    }
+
     // 格式化日期显示（发布于 + 更新于）
     let dateText = `发布于：${review.publishDate}`;
     if (review.updateDate) {
@@ -1970,7 +2078,7 @@ class UIRenderer {
         <div class="frf_author_row">
           <div class="frf_author_left">
             <a href="${review.userProfileUrl}" class="frf_avatar_link">
-              <img src="${avatarUrl}" class="frf_avatar_img">
+              ${avatarHtml}
             </a>
             <div class="frf_author_info">
               <a href="${review.userProfileUrl}" class="frf_author_name">${review.userName}</a>
@@ -2521,12 +2629,31 @@ class UIRenderer {
         text-align: left;
       }
 
+      /* 头像容器（用于头像框场景） */
+      .frf_avatar_container {
+        position: relative;
+        width: 32px;
+        height: 32px;
+        display: block;
+      }
+
       .frf_avatar_img {
         width: 32px;
         height: 32px;
         display: block;
         margin: 0;
         object-fit: cover;
+      }
+
+      /* 头像框：绝对定位覆盖在头像上方 */
+      .frf_avatar_frame {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 32px;
+        height: 32px;
+        pointer-events: none;
+        z-index: 1;
       }
 
       .frf_author_info {
@@ -2938,6 +3065,7 @@ class SettingsPanel {
           <!-- 显示设置 -->
           <div class="frf_settings_section">
             <h3>显示设置</h3>
+            <p class="frf_section_desc">显示设置保存后刷新页面即可生效。FRF 刷新按钮是对当前游戏的所有好友评测进行重新检测。</p>
             <div class="frf_settings_row frf_settings_row_vertical">
               <div class="frf_row_header">
                 <label for="frf_render_batch">每次渲染评测数</label>
@@ -2954,30 +3082,18 @@ class SettingsPanel {
             </div>
           </div>
 
-          <!-- 性能设置 -->
-          <div class="frf_settings_section">
-            <h3>性能设置</h3>
-            <div class="frf_settings_row frf_settings_row_vertical">
-              <div class="frf_row_header">
-                <label for="frf_background_update">后台静默更新</label>
-                <label class="frf_toggle">
-                  <input type="checkbox" id="frf_background_update" checked>
-                  <span class="frf_toggle_slider"></span>
-                </label>
-              </div>
-              <span class="frf_input_desc">启用后，从缓存加载评测时会在后台自动检查是否有新的好友评测</span>
-            </div>
-          </div>
-
           <!-- 缓存管理 -->
           <div class="frf_settings_section">
             <h3>缓存管理</h3>
+            <p class="frf_section_desc">FRF 会缓存好友的评测数据，避免每次访问游戏页面都重新搜索。缓存自动构建，7 天后过期。</p>
             <div class="frf_settings_info" id="frf_cache_info">
               <div class="frf_info_loading">正在加载缓存信息...</div>
             </div>
             <div class="frf_settings_actions">
               <button class="frf_btn frf_btn_danger" id="frf_clear_cache">清除缓存</button>
-              <button class="frf_btn frf_btn_secondary" id="frf_refresh_stats">刷新统计</button>
+              <button class="frf_btn frf_btn_secondary" id="frf_export_cache">导出缓存</button>
+              <button class="frf_btn frf_btn_secondary" id="frf_import_cache">导入缓存</button>
+              <input type="file" id="frf_import_file" accept=".json" style="display: none;">
             </div>
           </div>
 
@@ -3017,7 +3133,7 @@ class SettingsPanel {
                 <label for="frf_delay">批次延迟</label>
                 <input type="number" id="frf_delay" min="0" max="5000" value="0">
               </div>
-              <span class="frf_input_desc">每批请求之间的等待时间（毫秒），推荐值为 0</span>
+              <span class="frf_input_desc">每批请求之间的等待时间（毫秒），推荐值为 50</span>
             </div>
           </div>
 
@@ -3076,9 +3192,19 @@ class SettingsPanel {
       this.clearCache();
     });
 
-    // 刷新统计
-    this.panelElement.querySelector('#frf_refresh_stats').addEventListener('click', () => {
-      this.loadCacheStats();
+    // 导出缓存
+    this.panelElement.querySelector('#frf_export_cache').addEventListener('click', () => {
+      this.exportCache();
+    });
+
+    // 导入缓存
+    this.panelElement.querySelector('#frf_import_cache').addEventListener('click', () => {
+      this.panelElement.querySelector('#frf_import_file').click();
+    });
+
+    this.panelElement.querySelector('#frf_import_file').addEventListener('change', (e) => {
+      this.importCache(e.target.files[0]);
+      e.target.value = ''; // 重置，允许重复选择同一文件
     });
 
     // 保存设置
@@ -3176,7 +3302,6 @@ class SettingsPanel {
     // 常规设置
     this.panelElement.querySelector('#frf_render_batch').value = settings.renderBatch || 3;
     this.panelElement.querySelector('#frf_content_truncate').value = typeof settings.contentTruncate === 'number' ? settings.contentTruncate : 300;
-    this.panelElement.querySelector('#frf_background_update').checked = settings.backgroundUpdate !== false; // 默认开启
 
     // 高级设置
     if (window.FRF && window.FRF._quickConfig) {
@@ -3207,7 +3332,6 @@ class SettingsPanel {
     // 常规设置
     const renderBatch = parseInt(this.panelElement.querySelector('#frf_render_batch').value, 10);
     const contentTruncate = parseInt(this.panelElement.querySelector('#frf_content_truncate').value, 10);
-    const backgroundUpdate = this.panelElement.querySelector('#frf_background_update').checked;
 
     // 高级设置
     const batchSize = parseInt(this.panelElement.querySelector('#frf_batch_size').value, 10);
@@ -3250,8 +3374,7 @@ class SettingsPanel {
       // 常规设置（存储到 FRF 对象）
       window.FRF._uiConfig = {
         renderBatch,
-        contentTruncate,
-        backgroundUpdate
+        contentTruncate
       };
     }
 
@@ -3260,7 +3383,6 @@ class SettingsPanel {
       // 常规
       renderBatch,
       contentTruncate,
-      backgroundUpdate,
       // 高级
       batchSize,
       delay,
@@ -3269,7 +3391,7 @@ class SettingsPanel {
     });
 
     this.showToast('设置已保存', 'success');
-    this.logger.info('设置已保存', { renderBatch, contentTruncate, backgroundUpdate, batchSize, delay, debugMode, quickDebug });
+    this.logger.info('设置已保存', { renderBatch, contentTruncate, batchSize, delay, debugMode, quickDebug });
   }
 
   /**
@@ -3279,11 +3401,10 @@ class SettingsPanel {
     // 常规设置默认值
     this.panelElement.querySelector('#frf_render_batch').value = 3;
     this.panelElement.querySelector('#frf_content_truncate').value = 300;
-    this.panelElement.querySelector('#frf_background_update').checked = true;
 
     // 高级设置默认值
     this.panelElement.querySelector('#frf_batch_size').value = 30;
-    this.panelElement.querySelector('#frf_delay').value = 0;
+    this.panelElement.querySelector('#frf_delay').value = 50;
     this.panelElement.querySelector('#frf_debug_mode').checked = false;
     this.panelElement.querySelector('#frf_quick_debug').checked = false;
 
@@ -3304,6 +3425,177 @@ class SettingsPanel {
         this.showToast('清除缓存失败: ' + error.message, 'error');
       }
     }
+  }
+
+  /**
+   * 导出缓存为 JSON 文件
+   */
+  exportCache() {
+    try {
+      const cacheKey = `${Constants.CACHE_KEY_PREFIX}review_dict_${Constants.CACHE_VERSION}`;
+      const cached = localStorage.getItem(cacheKey);
+
+      if (!cached) {
+        this.showToast('没有可导出的缓存数据', 'error');
+        return;
+      }
+
+      const cacheData = JSON.parse(cached);
+
+      // 添加导出元信息
+      const exportData = {
+        exportTime: new Date().toISOString(),
+        frfVersion: Constants.VERSION,
+        cacheVersion: cacheData.version,
+        cacheTimestamp: cacheData.timestamp,
+        friendsCount: Object.keys(cacheData.data).length,
+        totalReviews: Object.values(cacheData.data).reduce((sum, arr) => sum + arr.length, 0),
+        data: cacheData.data
+      };
+
+      // 生成文件名
+      const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const filename = `frf_cache_${date}.json`;
+
+      // 创建下载
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      this.showToast(`缓存已导出: ${filename}`, 'success');
+      this.logger.info('缓存已导出', { filename, friendsCount: exportData.friendsCount });
+
+    } catch (error) {
+      this.showToast('导出缓存失败: ' + error.message, 'error');
+      this.logger.error('导出缓存失败', error);
+    }
+  }
+
+  /**
+   * 从 JSON 文件导入缓存
+   * @param {File} file - 要导入的 JSON 文件
+   */
+  importCache(file) {
+    if (!file) return;
+
+    const reader = new FileReader();
+
+    reader.onload = (e) => {
+      try {
+        const importData = JSON.parse(e.target.result);
+
+        // 验证导入数据格式
+        if (!importData.data || typeof importData.data !== 'object') {
+          this.showToast('无效的缓存文件格式', 'error');
+          return;
+        }
+
+        // 验证数据结构：data 应该是 { steamId: [appId, ...] } 格式
+        const steamIds = Object.keys(importData.data);
+        if (steamIds.length === 0) {
+          this.showToast('缓存文件中没有数据', 'error');
+          return;
+        }
+
+        // 简单验证第一个条目的格式
+        const firstEntry = importData.data[steamIds[0]];
+        if (!Array.isArray(firstEntry)) {
+          this.showToast('无效的缓存数据结构', 'error');
+          return;
+        }
+
+        // 询问用户导入模式
+        const hasExistingCache = localStorage.getItem(`${Constants.CACHE_KEY_PREFIX}review_dict_${Constants.CACHE_VERSION}`);
+        let importMode = 'replace'; // 默认替换
+
+        if (hasExistingCache) {
+          const choice = confirm(
+            `检测到已有缓存数据。\n\n` +
+            `导入文件包含 ${steamIds.length} 个好友的数据。\n\n` +
+            `点击"确定"：合并数据（保留现有 + 添加新数据）\n` +
+            `点击"取消"：替换数据（清空现有，使用导入数据）`
+          );
+          importMode = choice ? 'merge' : 'replace';
+        }
+
+        // 执行导入
+        const cacheKey = `${Constants.CACHE_KEY_PREFIX}review_dict_${Constants.CACHE_VERSION}`;
+
+        if (importMode === 'merge') {
+          // 合并模式：加载现有缓存，合并新数据
+          const existingRaw = localStorage.getItem(cacheKey);
+          let existingData = {};
+
+          if (existingRaw) {
+            const existing = JSON.parse(existingRaw);
+            existingData = existing.data || {};
+          }
+
+          // 合并数据
+          let addedFriends = 0;
+          let addedReviews = 0;
+
+          for (const [steamId, appIds] of Object.entries(importData.data)) {
+            if (!existingData[steamId]) {
+              existingData[steamId] = [];
+              addedFriends++;
+            }
+
+            for (const appId of appIds) {
+              if (!existingData[steamId].includes(appId)) {
+                existingData[steamId].push(appId);
+                addedReviews++;
+              }
+            }
+          }
+
+          // 保存合并后的数据
+          const mergedCache = {
+            version: Constants.CACHE_VERSION,
+            timestamp: Date.now(),
+            data: existingData
+          };
+
+          localStorage.setItem(cacheKey, JSON.stringify(mergedCache));
+
+          this.showToast(`合并成功：+${addedFriends} 好友，+${addedReviews} 条记录`, 'success');
+          this.logger.info('缓存合并导入完成', { addedFriends, addedReviews });
+
+        } else {
+          // 替换模式：直接使用导入数据
+          const newCache = {
+            version: Constants.CACHE_VERSION,
+            timestamp: importData.cacheTimestamp || Date.now(),
+            data: importData.data
+          };
+
+          localStorage.setItem(cacheKey, JSON.stringify(newCache));
+
+          const totalReviews = Object.values(importData.data).reduce((sum, arr) => sum + arr.length, 0);
+          this.showToast(`导入成功：${steamIds.length} 好友，${totalReviews} 条记录`, 'success');
+          this.logger.info('缓存替换导入完成', { friendsCount: steamIds.length, totalReviews });
+        }
+
+        // 刷新统计显示
+        this.loadCacheStats();
+
+      } catch (error) {
+        this.showToast('导入失败: ' + error.message, 'error');
+        this.logger.error('导入缓存失败', error);
+      }
+    };
+
+    reader.onerror = () => {
+      this.showToast('读取文件失败', 'error');
+    };
+
+    reader.readAsText(file);
   }
 
   /**
@@ -3350,8 +3642,7 @@ class SettingsPanel {
       // 常规设置
       window.FRF._uiConfig = {
         renderBatch: settings.renderBatch || 3,
-        contentTruncate: typeof settings.contentTruncate === 'number' ? settings.contentTruncate : 300,
-        backgroundUpdate: settings.backgroundUpdate !== false
+        contentTruncate: typeof settings.contentTruncate === 'number' ? settings.contentTruncate : 300
       };
 
       this.logger.info('已应用保存的设置', settings);
@@ -3598,6 +3889,13 @@ class SettingsPanel {
         color: #67c1f5;
         text-transform: uppercase;
         letter-spacing: 0.5px;
+      }
+
+      .frf_section_desc {
+        margin: 0 0 12px 0;
+        font-size: 12px;
+        color: #8f98a0;
+        line-height: 1.5;
       }
 
       /* 设置行 */
@@ -3945,7 +4243,7 @@ if (typeof window !== 'undefined') {
  * 智能缓存架构：
  * - 快速模式：单游戏搜索，遍历好友，获取最新数据
  * - 渐进式缓存：快速搜索结果自动同步到缓存
- * - 后台更新：缓存命中时先显示，后台静默检查更新
+ * - 429限流处理：遇到限流自动等待重试
  *
  * v5.0 改进：
  * - 移除废弃的 FriendReviewFinder 类
@@ -4084,10 +4382,10 @@ if (typeof window !== 'undefined') {
     /**
      * 快速模式 - 单游戏搜索
      */
-    // 快速模式配置（已优化：基于实测数据）
+    // 快速模式配置（已优化：基于限流研究）
     _quickConfig: {
       batchSize: 30,
-      delay: 0,
+      delay: 50,
       debug: false
     },
 
@@ -4299,9 +4597,6 @@ if (typeof window !== 'undefined') {
           // 使用缓存数据：分批获取详细数据
           const cachedReviews = await this._fetchFullReviews(matchedFriends, appId);
 
-          // 启动后台静默更新
-          this._backgroundUpdate(appId, cachedReviews);
-
           return cachedReviews;
         } else {
           console.log('📚 缓存中无此游戏记录，切换到快速模式');
@@ -4315,137 +4610,6 @@ if (typeof window !== 'undefined') {
       return await this._fetchReviewsQuickMode(appId);
     },
 
-    /**
-     * 后台静默更新
-     * 在缓存加载完成后，后台运行快速搜索检查是否有数据改动
-     *
-     * @param {string} appId - 游戏ID
-     * @param {Array} cachedReviews - 缓存中的评测数据
-     */
-    _backgroundUpdate: async function(appId, cachedReviews) {
-      console.log('🔄 后台静默更新启动...');
-
-      try {
-        // 后台执行快速搜索（静默模式，不渲染）
-        const freshSteamIds = await this._quickScanForSteamIds(appId);
-
-        // 比较差异
-        const cachedSteamIds = cachedReviews.map(r => r.steamId);
-        const diff = this._compareReviewSets(cachedSteamIds, freshSteamIds);
-
-        if (diff.hasChanges) {
-          console.log(`🔔 后台更新发现数据改动: +${diff.added.length} -${diff.removed.length}`);
-          // 显示更新提示
-          this._showUpdateNotice(diff);
-
-          // 同步缓存：添加新评测，移除已删除的评测
-          const cache = new ReviewCache();
-          cache.loadFromCache();
-
-          // 添加新发现的评测
-          diff.added.forEach(steamId => {
-            cache.addReviewToCache(steamId, appId);
-          });
-
-          // 移除已删除的评测
-          diff.removed.forEach(steamId => {
-            cache.removeReviewFromCache(steamId, appId);
-          });
-
-          cache.saveToCache();
-          console.log(`🔗 缓存已更新: +${diff.added.length} -${diff.removed.length}`);
-        } else {
-          console.log('✅ 后台更新完成，数据无改动');
-        }
-      } catch (error) {
-        console.warn('后台更新失败:', error);
-      }
-    },
-
-    /**
-     * 快速扫描获取Steam IDs（不获取详细数据，只检查哪些好友有评测）
-     * 用于后台更新时快速比对
-     *
-     * @param {string} appId - 游戏ID
-     * @returns {Promise<Array<string>>} 有评测的好友Steam ID列表
-     */
-    _quickScanForSteamIds: async function(appId) {
-      const searcher = new QuickSearcher(appId);
-      searcher.batchSize = this._quickConfig.batchSize;
-      searcher.delay = this._quickConfig.delay;
-
-      const friendIds = await searcher.fetchFriendIds();
-      const steamIdsWithReview = [];
-
-      // 批量检查（不获取详细内容）
-      for (let i = 0; i < friendIds.length; i += searcher.batchSize) {
-        const batch = friendIds.slice(i, i + searcher.batchSize);
-
-        const results = await Promise.all(
-          batch.map(async (steamId) => {
-            try {
-              const result = await searcher.checkFriendReview(steamId, false);
-              return result ? steamId : null;
-            } catch {
-              return null;
-            }
-          })
-        );
-
-        results.filter(id => id !== null).forEach(id => {
-          steamIdsWithReview.push(id);
-        });
-
-        // 批次延迟
-        if (searcher.delay > 0 && i + searcher.batchSize < friendIds.length) {
-          await new Promise(r => setTimeout(r, searcher.delay));
-        }
-      }
-
-      return steamIdsWithReview;
-    },
-
-    /**
-     * 比较两组评测数据，找出差异
-     *
-     * @param {Array<string>} cachedIds - 缓存中的Steam ID列表
-     * @param {Array<string>} freshIds - 最新的Steam ID列表
-     * @returns {Object} 差异信息 { hasChanges, added, removed }
-     */
-    _compareReviewSets: function(cachedIds, freshIds) {
-      const cachedSet = new Set(cachedIds);
-      const freshSet = new Set(freshIds);
-
-      const added = freshIds.filter(id => !cachedSet.has(id));
-      const removed = cachedIds.filter(id => !freshSet.has(id));
-
-      return {
-        hasChanges: added.length > 0 || removed.length > 0,
-        added,
-        removed
-      };
-    },
-
-    /**
-     * 显示数据更新提示
-     *
-     * @param {Object} diff - 差异信息
-     */
-    _showUpdateNotice: function(diff) {
-      if (!this._uiRenderer) return;
-
-      // 构建提示消息
-      let message = '发现数据改动';
-      if (diff.added.length > 0 && diff.removed.length > 0) {
-        message = `发现数据改动（+${diff.added.length} 新增，-${diff.removed.length} 移除）`;
-      } else if (diff.added.length > 0) {
-        message = `发现 ${diff.added.length} 条新评测`;
-      } else if (diff.removed.length > 0) {
-        message = `有 ${diff.removed.length} 条评测已不可用`;
-      }
-
-      this._uiRenderer.showUpdateNotice(message);
-    },
 
     /**
      * 快速模式获取完整评测数据（用于UI）
@@ -4711,7 +4875,6 @@ if (typeof window !== 'undefined') {
   console.log('');
   console.log('📖 输入 %cFRF.help()%c 查看使用说明', 'color: #ff9800; font-weight: bold;', '');
   console.log('🔧 智能缓存: 首次搜索后自动缓存，下次秒加载');
-  console.log('🔄 后台更新: 缓存加载后自动检查数据改动');
   console.log('');
 
   // 自动启动检测（延迟执行，等待页面加载完成）

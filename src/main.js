@@ -5,7 +5,7 @@
  * 智能缓存架构：
  * - 快速模式：单游戏搜索，遍历好友，获取最新数据
  * - 渐进式缓存：快速搜索结果自动同步到缓存
- * - 后台更新：缓存命中时先显示，后台静默检查更新
+ * - 429限流处理：遇到限流自动等待重试
  *
  * v5.0 改进：
  * - 移除废弃的 FriendReviewFinder 类
@@ -144,10 +144,10 @@ if (typeof window !== 'undefined') {
     /**
      * 快速模式 - 单游戏搜索
      */
-    // 快速模式配置（已优化：基于实测数据）
+    // 快速模式配置（已优化：基于限流研究）
     _quickConfig: {
       batchSize: 30,
-      delay: 0,
+      delay: 50,
       debug: false
     },
 
@@ -359,9 +359,6 @@ if (typeof window !== 'undefined') {
           // 使用缓存数据：分批获取详细数据
           const cachedReviews = await this._fetchFullReviews(matchedFriends, appId);
 
-          // 启动后台静默更新
-          this._backgroundUpdate(appId, cachedReviews);
-
           return cachedReviews;
         } else {
           console.log('📚 缓存中无此游戏记录，切换到快速模式');
@@ -375,137 +372,6 @@ if (typeof window !== 'undefined') {
       return await this._fetchReviewsQuickMode(appId);
     },
 
-    /**
-     * 后台静默更新
-     * 在缓存加载完成后，后台运行快速搜索检查是否有数据改动
-     *
-     * @param {string} appId - 游戏ID
-     * @param {Array} cachedReviews - 缓存中的评测数据
-     */
-    _backgroundUpdate: async function(appId, cachedReviews) {
-      console.log('🔄 后台静默更新启动...');
-
-      try {
-        // 后台执行快速搜索（静默模式，不渲染）
-        const freshSteamIds = await this._quickScanForSteamIds(appId);
-
-        // 比较差异
-        const cachedSteamIds = cachedReviews.map(r => r.steamId);
-        const diff = this._compareReviewSets(cachedSteamIds, freshSteamIds);
-
-        if (diff.hasChanges) {
-          console.log(`🔔 后台更新发现数据改动: +${diff.added.length} -${diff.removed.length}`);
-          // 显示更新提示
-          this._showUpdateNotice(diff);
-
-          // 同步缓存：添加新评测，移除已删除的评测
-          const cache = new ReviewCache();
-          cache.loadFromCache();
-
-          // 添加新发现的评测
-          diff.added.forEach(steamId => {
-            cache.addReviewToCache(steamId, appId);
-          });
-
-          // 移除已删除的评测
-          diff.removed.forEach(steamId => {
-            cache.removeReviewFromCache(steamId, appId);
-          });
-
-          cache.saveToCache();
-          console.log(`🔗 缓存已更新: +${diff.added.length} -${diff.removed.length}`);
-        } else {
-          console.log('✅ 后台更新完成，数据无改动');
-        }
-      } catch (error) {
-        console.warn('后台更新失败:', error);
-      }
-    },
-
-    /**
-     * 快速扫描获取Steam IDs（不获取详细数据，只检查哪些好友有评测）
-     * 用于后台更新时快速比对
-     *
-     * @param {string} appId - 游戏ID
-     * @returns {Promise<Array<string>>} 有评测的好友Steam ID列表
-     */
-    _quickScanForSteamIds: async function(appId) {
-      const searcher = new QuickSearcher(appId);
-      searcher.batchSize = this._quickConfig.batchSize;
-      searcher.delay = this._quickConfig.delay;
-
-      const friendIds = await searcher.fetchFriendIds();
-      const steamIdsWithReview = [];
-
-      // 批量检查（不获取详细内容）
-      for (let i = 0; i < friendIds.length; i += searcher.batchSize) {
-        const batch = friendIds.slice(i, i + searcher.batchSize);
-
-        const results = await Promise.all(
-          batch.map(async (steamId) => {
-            try {
-              const result = await searcher.checkFriendReview(steamId, false);
-              return result ? steamId : null;
-            } catch {
-              return null;
-            }
-          })
-        );
-
-        results.filter(id => id !== null).forEach(id => {
-          steamIdsWithReview.push(id);
-        });
-
-        // 批次延迟
-        if (searcher.delay > 0 && i + searcher.batchSize < friendIds.length) {
-          await new Promise(r => setTimeout(r, searcher.delay));
-        }
-      }
-
-      return steamIdsWithReview;
-    },
-
-    /**
-     * 比较两组评测数据，找出差异
-     *
-     * @param {Array<string>} cachedIds - 缓存中的Steam ID列表
-     * @param {Array<string>} freshIds - 最新的Steam ID列表
-     * @returns {Object} 差异信息 { hasChanges, added, removed }
-     */
-    _compareReviewSets: function(cachedIds, freshIds) {
-      const cachedSet = new Set(cachedIds);
-      const freshSet = new Set(freshIds);
-
-      const added = freshIds.filter(id => !cachedSet.has(id));
-      const removed = cachedIds.filter(id => !freshSet.has(id));
-
-      return {
-        hasChanges: added.length > 0 || removed.length > 0,
-        added,
-        removed
-      };
-    },
-
-    /**
-     * 显示数据更新提示
-     *
-     * @param {Object} diff - 差异信息
-     */
-    _showUpdateNotice: function(diff) {
-      if (!this._uiRenderer) return;
-
-      // 构建提示消息
-      let message = '发现数据改动';
-      if (diff.added.length > 0 && diff.removed.length > 0) {
-        message = `发现数据改动（+${diff.added.length} 新增，-${diff.removed.length} 移除）`;
-      } else if (diff.added.length > 0) {
-        message = `发现 ${diff.added.length} 条新评测`;
-      } else if (diff.removed.length > 0) {
-        message = `有 ${diff.removed.length} 条评测已不可用`;
-      }
-
-      this._uiRenderer.showUpdateNotice(message);
-    },
 
     /**
      * 快速模式获取完整评测数据（用于UI）
@@ -771,7 +637,6 @@ if (typeof window !== 'undefined') {
   console.log('');
   console.log('📖 输入 %cFRF.help()%c 查看使用说明', 'color: #ff9800; font-weight: bold;', '');
   console.log('🔧 智能缓存: 首次搜索后自动缓存，下次秒加载');
-  console.log('🔄 后台更新: 缓存加载后自动检查数据改动');
   console.log('');
 
   // 自动启动检测（延迟执行，等待页面加载完成）
