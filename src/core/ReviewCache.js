@@ -51,8 +51,20 @@ class ReviewCache {
         return false;
       }
 
-      if (age >= Constants.CACHE_DURATION) {
-        this.logger.info(`缓存已过期 (${(age / 86400000).toFixed(1)} 天)`);
+      // 获取用户设置的缓存有效期（天数），默认3天
+      const cacheDays = (window.FRF && typeof window.FRF._cacheDays === 'number')
+        ? window.FRF._cacheDays
+        : 3;
+
+      // 如果设置为0，表示不使用缓存
+      if (cacheDays === 0) {
+        this.logger.info('缓存已禁用（用户设置为不缓存）');
+        return false;
+      }
+
+      const cacheDuration = cacheDays * 24 * 3600000; // 转换为毫秒
+      if (age >= cacheDuration) {
+        this.logger.info(`缓存已过期 (${(age / 86400000).toFixed(1)} 天，有效期 ${cacheDays} 天)`);
         return false;
       }
 

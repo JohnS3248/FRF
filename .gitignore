@@ -15,6 +15,7 @@ logs/
 pitcures/
 pics/
 前期调研文档/
+tests/
 
 # OS files
 .DS_Store

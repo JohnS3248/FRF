@@ -151,6 +151,9 @@ if (typeof window !== 'undefined') {
       debug: false
     },
 
+    // 缓存有效期（天数），0表示不缓存，默认3天
+    _cacheDays: 3,
+
     /**
      * 设置快速模式参数
      * @param {Object} config - { batchSize, delay, debug }

@@ -128,7 +128,14 @@ class SettingsPanel {
           <!-- 缓存管理 -->
           <div class="frf_settings_section">
             <h3>缓存管理</h3>
-            <p class="frf_section_desc">FRF 会缓存好友的评测数据，避免每次访问游戏页面都重新搜索。缓存自动构建，7 天后过期。</p>
+            <p class="frf_section_desc">FRF 会缓存好友的评测数据，避免每次访问游戏页面都重新搜索。缓存自动构建。</p>
+            <div class="frf_settings_row frf_settings_row_vertical">
+              <div class="frf_row_header">
+                <label for="frf_cache_days">缓存有效期（天）</label>
+                <input type="number" id="frf_cache_days" min="0" max="7" value="3">
+              </div>
+              <span class="frf_input_desc">可填 0-7，填 0 表示不缓存即每次都重新搜索，推荐值为 3</span>
+            </div>
             <div class="frf_settings_info" id="frf_cache_info">
               <div class="frf_info_loading">正在加载缓存信息...</div>
             </div>
@@ -345,6 +352,7 @@ class SettingsPanel {
     // 常规设置
     this.panelElement.querySelector('#frf_render_batch').value = settings.renderBatch || 3;
     this.panelElement.querySelector('#frf_content_truncate').value = typeof settings.contentTruncate === 'number' ? settings.contentTruncate : 300;
+    this.panelElement.querySelector('#frf_cache_days').value = typeof settings.cacheDays === 'number' ? settings.cacheDays : 3;
 
     // 高级设置
     if (window.FRF && window.FRF._quickConfig) {
@@ -375,6 +383,7 @@ class SettingsPanel {
     // 常规设置
     const renderBatch = parseInt(this.panelElement.querySelector('#frf_render_batch').value, 10);
     const contentTruncate = parseInt(this.panelElement.querySelector('#frf_content_truncate').value, 10);
+    const cacheDays = parseInt(this.panelElement.querySelector('#frf_cache_days').value, 10);
 
     // 高级设置
     const batchSize = parseInt(this.panelElement.querySelector('#frf_batch_size').value, 10);
@@ -390,6 +399,11 @@ class SettingsPanel {
 
     if (contentTruncate < 0 || contentTruncate > 8000) {
       this.showToast('截断长度必须在 0-8000 之间', 'error');
+      return;
+    }
+
+    if (cacheDays < 0 || cacheDays > 7) {
+      this.showToast('缓存有效期必须在 0-7 之间', 'error');
       return;
     }
 
@@ -417,8 +431,12 @@ class SettingsPanel {
       // 常规设置（存储到 FRF 对象）
       window.FRF._uiConfig = {
         renderBatch,
-        contentTruncate
+        contentTruncate,
+        cacheDays
       };
+
+      // 更新缓存有效期配置
+      window.FRF._cacheDays = cacheDays;
     }
 
     // 保存到 localStorage
@@ -426,6 +444,7 @@ class SettingsPanel {
       // 常规
       renderBatch,
       contentTruncate,
+      cacheDays,
       // 高级
       batchSize,
       delay,
@@ -434,7 +453,7 @@ class SettingsPanel {
     });
 
     this.showToast('设置已保存', 'success');
-    this.logger.info('设置已保存', { renderBatch, contentTruncate, batchSize, delay, debugMode, quickDebug });
+    this.logger.info('设置已保存', { renderBatch, contentTruncate, cacheDays, batchSize, delay, debugMode, quickDebug });
   }
 
   /**
@@ -444,6 +463,7 @@ class SettingsPanel {
     // 常规设置默认值
     this.panelElement.querySelector('#frf_render_batch').value = 3;
     this.panelElement.querySelector('#frf_content_truncate').value = 300;
+    this.panelElement.querySelector('#frf_cache_days').value = 3;
 
     // 高级设置默认值
     this.panelElement.querySelector('#frf_batch_size').value = 30;
@@ -685,8 +705,12 @@ class SettingsPanel {
       // 常规设置
       window.FRF._uiConfig = {
         renderBatch: settings.renderBatch || 3,
-        contentTruncate: typeof settings.contentTruncate === 'number' ? settings.contentTruncate : 300
+        contentTruncate: typeof settings.contentTruncate === 'number' ? settings.contentTruncate : 300,
+        cacheDays: typeof settings.cacheDays === 'number' ? settings.cacheDays : 3
       };
+
+      // 缓存有效期配置
+      window.FRF._cacheDays = typeof settings.cacheDays === 'number' ? settings.cacheDays : 3;
 
       this.logger.info('已应用保存的设置', settings);
     }
