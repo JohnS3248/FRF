@@ -398,12 +398,12 @@ if (typeof window !== 'undefined') {
 
       console.log(`📊 开始处理 ${total} 个好友...`);
 
-      // 分批渲染函数
-      const flushRenderQueue = () => {
+      // 分批渲染函数（异步处理截图）
+      const flushRenderQueue = async () => {
         if (pendingRender.length > 0 && this._uiRenderer) {
-          pendingRender.forEach(review => {
-            this._uiRenderer.appendCard(review);
-          });
+          for (const review of pendingRender) {
+            await this._uiRenderer.appendCard(review);
+          }
           console.log(`🎨 渲染了 ${pendingRender.length} 篇评测，共 ${reviews.length} 篇`);
           pendingRender.length = 0; // 清空队列
         }
@@ -431,15 +431,16 @@ if (typeof window !== 'undefined') {
         );
 
         // 收集有效结果
-        batchResults.filter(r => r !== null).forEach(review => {
+        const validResults = batchResults.filter(r => r !== null);
+        for (const review of validResults) {
           reviews.push(review);
           pendingRender.push(review);
 
           // 每满5篇就渲染一次
           if (pendingRender.length >= RENDER_BATCH_SIZE) {
-            flushRenderQueue();
+            await flushRenderQueue();
           }
-        });
+        }
 
         current += batch.length;
         if (this._uiRenderer) {
@@ -453,7 +454,7 @@ if (typeof window !== 'undefined') {
       }
 
       // 渲染剩余的评测
-      flushRenderQueue();
+      await flushRenderQueue();
 
       // 隐藏加载状态
       if (this._uiRenderer) {
@@ -483,12 +484,12 @@ if (typeof window !== 'undefined') {
 
       console.log(`📥 获取 ${total} 条评测的详细数据...`);
 
-      // 分批渲染函数
-      const flushRenderQueue = () => {
+      // 分批渲染函数（异步处理截图）
+      const flushRenderQueue = async () => {
         if (pendingRender.length > 0 && this._uiRenderer) {
-          pendingRender.forEach(review => {
-            this._uiRenderer.appendCard(review);
-          });
+          for (const review of pendingRender) {
+            await this._uiRenderer.appendCard(review);
+          }
           console.log(`🎨 渲染了 ${pendingRender.length} 篇评测，共 ${reviews.length} 篇`);
           pendingRender.length = 0; // 清空队列
         }
@@ -520,15 +521,16 @@ if (typeof window !== 'undefined') {
         );
 
         // 收集有效结果
-        batchResults.filter(r => r !== null).forEach(review => {
+        const validResults = batchResults.filter(r => r !== null);
+        for (const review of validResults) {
           reviews.push(review);
           pendingRender.push(review);
 
           // 每满5篇就渲染一次
           if (pendingRender.length >= RENDER_BATCH_SIZE) {
-            flushRenderQueue();
+            await flushRenderQueue();
           }
-        });
+        }
 
         current += batch.length;
         if (this._uiRenderer) {
@@ -542,7 +544,7 @@ if (typeof window !== 'undefined') {
       }
 
       // 渲染剩余的评测
-      flushRenderQueue();
+      await flushRenderQueue();
 
       // 隐藏加载状态
       if (this._uiRenderer) {

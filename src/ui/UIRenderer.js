@@ -281,21 +281,26 @@ class UIRenderer {
   /**
    * 渲染单个评测卡片
    * @param {Object} review - 评测数据对象
-   * @returns {HTMLElement} 卡片元素
+   * @returns {Promise<HTMLElement>} 卡片元素
    */
-  renderCard(review) {
+  async renderCard(review) {
     const card = document.createElement('div');
     // 使用自定义class，避免Steam CSS干扰
     card.className = 'frf_card';
     card.setAttribute('role', 'button');
+
+    // 处理截图链接（异步）
+    if (review.reviewContent) {
+      review.reviewContent = await this.processScreenshots(review.reviewContent);
+    }
 
     // 构建卡片HTML
     card.innerHTML = this.buildCardHTML(review);
 
     // 添加点击事件（打开评测详情）
     card.addEventListener('click', (e) => {
-      // 如果点击的是链接，不处理
-      if (e.target.tagName === 'A' || e.target.closest('a')) return;
+      // 如果点击的是链接或图片，不处理
+      if (e.target.tagName === 'A' || e.target.tagName === 'IMG' || e.target.closest('a')) return;
       window.open(`https://steamcommunity.com${review.url}`, '_blank');
     });
 
@@ -436,7 +441,7 @@ class UIRenderer {
    * 批量渲染评测卡片
    * @param {Array} reviews - 评测数据数组
    */
-  renderAll(reviews) {
+  async renderAll(reviews) {
     if (!this.container) {
       this.logger.error('容器未初始化');
       return;
@@ -450,10 +455,11 @@ class UIRenderer {
       return;
     }
 
-    reviews.forEach(review => {
-      const card = this.renderCard(review);
+    // 逐个渲染（异步处理截图）
+    for (const review of reviews) {
+      const card = await this.renderCard(review);
       this.container.appendChild(card);
-    });
+    }
 
     this.logger.info(`渲染完成，共 ${reviews.length} 条评测`);
   }
@@ -462,10 +468,10 @@ class UIRenderer {
    * 追加单个评测卡片（用于逐步显示）
    * @param {Object} review - 评测数据
    */
-  appendCard(review) {
+  async appendCard(review) {
     if (!this.container) return;
 
-    const card = this.renderCard(review);
+    const card = await this.renderCard(review);
     this.container.appendChild(card);
   }
 
@@ -629,6 +635,112 @@ class UIRenderer {
     }
 
     return result;
+  }
+
+  /**
+   * 处理评测内容中的截图链接，替换为实际图片
+   * @param {string} content - 原始评测内容HTML
+   * @returns {Promise<string>} 处理后的HTML
+   */
+  async processScreenshots(content) {
+    if (!content) return content;
+
+    // 匹配完整的 <a> 标签包裹的 Steam 截图链接
+    // 原始格式: <a class="bb_link" href="https://steamcommunity.com/sharedfiles/filedetails/?id=xxx" target="_blank" ...>https://steamcommunity.com/sharedfiles/filedetails/?id=xxx</a>
+    const screenshotLinkRegex = /<a[^>]*href="(https:\/\/steamcommunity\.com\/sharedfiles\/filedetails\/\?id=(\d+))"[^>]*>.*?<\/a>/g;
+    const matches = [...content.matchAll(screenshotLinkRegex)];
+
+    if (matches.length === 0) return content;
+
+    this.logger.info(`发现 ${matches.length} 个截图链接，正在获取图片...`);
+
+    // 并行获取所有截图的图片URL
+    const imageUrls = await Promise.all(
+      matches.map(match => this.fetchScreenshotImage(match[2])) // match[2] 是文件ID
+    );
+
+    // 替换链接为图片
+    let processedContent = content;
+    matches.forEach((match, index) => {
+      const imageUrl = imageUrls[index];
+      const originalUrl = match[1]; // 原始链接URL
+      const fullMatch = match[0];   // 完整的 <a> 标签
+      if (imageUrl) {
+        // 替换整个 <a> 标签为图片容器
+        const imgHtml = `<div class="frf_screenshot_container"><a href="${originalUrl}" target="_blank"><img src="${imageUrl}" class="frf_screenshot_img" alt="Steam 截图"></a></div>`;
+        processedContent = processedContent.replace(fullMatch, imgHtml);
+      }
+      // 如果获取失败，保留原链接
+    });
+
+    return processedContent;
+  }
+
+  /**
+   * 获取截图页面的图片URL
+   * @param {string} fileId - 截图文件ID
+   * @returns {Promise<string|null>} 图片URL或null
+   */
+  async fetchScreenshotImage(fileId) {
+    const url = `https://steamcommunity.com/sharedfiles/filedetails/?id=${fileId}`;
+    const retryDelay = 10000;    // 重试等待时间（10秒）
+    const maxRetryDuration = 60000; // 最大重试时长（1分钟）
+    const requestStartTime = Date.now();
+
+    while (true) {
+      try {
+        const response = await fetch(url, {
+          credentials: 'include',
+          redirect: 'follow'
+        });
+
+        // 429 限流处理：无限重试，最多1分钟
+        if (response.status === 429) {
+          const totalElapsed = Date.now() - requestStartTime;
+          if (totalElapsed < maxRetryDuration) {
+            this.logger.info(`截图 ${fileId} 遇到 429 限流，等待 ${retryDelay/1000}s 后重试...`);
+            await new Promise(r => setTimeout(r, retryDelay));
+            continue;
+          } else {
+            this.logger.warn(`截图 ${fileId} 获取失败：超过最大重试时长`);
+            return null;
+          }
+        }
+
+        if (!response.ok) {
+          this.logger.warn(`截图 ${fileId} 获取失败：HTTP ${response.status}`);
+          return null;
+        }
+
+        const html = await response.text();
+
+        // 从 og:image 提取图片URL
+        const ogImageMatch = html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/);
+        if (ogImageMatch) {
+          // 解码HTML实体
+          let imageUrl = ogImageMatch[1].replace(/&amp;/g, '&');
+          // 移除尺寸限制参数，保持原图比例，只设置合理的最大宽度
+          imageUrl = imageUrl.replace(/imw=\d+/, 'imw=800').replace(/&imh=\d+/, '').replace(/&ima=[^&]+/, '').replace(/&impolicy=[^&]+/, '').replace(/&imcolor=[^&]+/, '').replace(/&letterbox=[^&]+/, '');
+          this.logger.info(`截图 ${fileId} 图片URL获取成功`);
+          return imageUrl;
+        }
+
+        // 备选：从 actualmediactn 提取
+        const actualMediaMatch = html.match(/class="actualmediactn"[^>]*>[\s\S]*?<img[^>]+src="([^"]+)"/);
+        if (actualMediaMatch) {
+          let imageUrl = actualMediaMatch[1].replace(/&amp;/g, '&');
+          this.logger.info(`截图 ${fileId} 图片URL获取成功（备选方式）`);
+          return imageUrl;
+        }
+
+        this.logger.warn(`截图 ${fileId} 未找到图片URL`);
+        return null;
+
+      } catch (error) {
+        this.logger.error(`截图 ${fileId} 获取出错：${error.message}`);
+        return null;
+      }
+    }
   }
 
   /**
@@ -938,6 +1050,31 @@ class UIRenderer {
         color: #acb2b8;
         word-wrap: break-word;
         overflow-wrap: break-word;
+      }
+
+      /* 截图容器 - 自适应图片尺寸 */
+      .frf_screenshot_container {
+        margin: 12px 0;
+        border-radius: 4px;
+        overflow: hidden;
+        background: rgba(0, 0, 0, 0.2);
+        display: inline-block;
+        max-width: 100%;
+      }
+
+      .frf_screenshot_container a {
+        display: block;
+      }
+
+      .frf_screenshot_img {
+        max-width: 100%;
+        height: auto;
+        display: block;
+        transition: opacity 0.2s;
+      }
+
+      .frf_screenshot_img:hover {
+        opacity: 0.9;
       }
 
       /* 底部用户信息栏 */

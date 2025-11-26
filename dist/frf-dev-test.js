@@ -1,6 +1,6 @@
 
 /**
- * FRF v5.1.7 - 开发测试版本
+ * FRF v5.2.0 - 开发测试版本
  * 智能缓存 + 设置面板
  *
  * 使用方法：
@@ -35,7 +35,7 @@
 
 const Constants = {
   // ==================== 版本信息 ====================
-  VERSION: '5.1.7',
+  VERSION: '5.2.0',
   CACHE_VERSION: 'v2', // 渐进式缓存版本
 
   // ==================== 请求配置 ====================
@@ -885,8 +885,20 @@ class ReviewCache {
         return false;
       }
 
-      if (age >= Constants.CACHE_DURATION) {
-        this.logger.info(`缓存已过期 (${(age / 86400000).toFixed(1)} 天)`);
+      // 获取用户设置的缓存有效期（天数），默认3天
+      const cacheDays = (window.FRF && typeof window.FRF._cacheDays === 'number')
+        ? window.FRF._cacheDays
+        : 3;
+
+      // 如果设置为0，表示不使用缓存
+      if (cacheDays === 0) {
+        this.logger.info('缓存已禁用（用户设置为不缓存）');
+        return false;
+      }
+
+      const cacheDuration = cacheDays * 24 * 3600000; // 转换为毫秒
+      if (age >= cacheDuration) {
+        this.logger.info(`缓存已过期 (${(age / 86400000).toFixed(1)} 天，有效期 ${cacheDays} 天)`);
         return false;
       }
 
@@ -1182,14 +1194,19 @@ class QuickSearcher {
    *
    * @param {string} steamId - 好友 Steam ID
    * @param {boolean} returnRaw - 是否返回原始数据（包含HTML）
-   * @param {number} retryCount - 当前重试次数（内部使用）
+   * @param {number} requestStartTime - 首次请求时间戳（内部使用）
    * @returns {Promise<Object|null>} 评测数据或 null
    */
-  async checkFriendReview(steamId, returnRaw = false, retryCount = 0) {
+  async checkFriendReview(steamId, returnRaw = false, requestStartTime = null) {
     const url = `https://steamcommunity.com/profiles/${steamId}/recommended/${this.appId}/`;
     const startTime = Date.now();
-    const maxRetries = 3;        // 最大重试次数
     const retryDelay = 10000;    // 重试等待时间（10秒）
+    const maxRetryDuration = 60000; // 最大重试时长（1分钟）
+
+    // 记录首次请求时间
+    if (requestStartTime === null) {
+      requestStartTime = startTime;
+    }
 
     try {
       const response = await fetch(url, {
@@ -1199,17 +1216,18 @@ class QuickSearcher {
 
       const elapsed = Date.now() - startTime;
 
-      // 429 限流处理：等待后重试
+      // 429 限流处理：无限重试，最多1分钟
       if (response.status === 429) {
-        if (retryCount < maxRetries) {
+        const totalElapsed = Date.now() - requestStartTime;
+        if (totalElapsed < maxRetryDuration) {
           if (this.debugMode) {
-            console.log(`[DEBUG] ${steamId} | 429 限流，等待 ${retryDelay/1000}s 后重试 (${retryCount + 1}/${maxRetries})`);
+            console.log(`[DEBUG] ${steamId} | 429 限流，等待 ${retryDelay/1000}s 后重试 (已用时 ${Math.round(totalElapsed/1000)}s)`);
           }
           await this.sleep(retryDelay);
-          return this.checkFriendReview(steamId, returnRaw, retryCount + 1);
+          return this.checkFriendReview(steamId, returnRaw, requestStartTime);
         } else {
           if (this.debugMode) {
-            console.log(`[DEBUG] ${steamId} | 429 限流，已达最大重试次数`);
+            console.log(`[DEBUG] ${steamId} | 429 限流，已超过最大重试时长 ${maxRetryDuration/1000}s`);
           }
           return null;
         }
@@ -1945,21 +1963,26 @@ class UIRenderer {
   /**
    * 渲染单个评测卡片
    * @param {Object} review - 评测数据对象
-   * @returns {HTMLElement} 卡片元素
+   * @returns {Promise<HTMLElement>} 卡片元素
    */
-  renderCard(review) {
+  async renderCard(review) {
     const card = document.createElement('div');
     // 使用自定义class，避免Steam CSS干扰
     card.className = 'frf_card';
     card.setAttribute('role', 'button');
+
+    // 处理截图链接（异步）
+    if (review.reviewContent) {
+      review.reviewContent = await this.processScreenshots(review.reviewContent);
+    }
 
     // 构建卡片HTML
     card.innerHTML = this.buildCardHTML(review);
 
     // 添加点击事件（打开评测详情）
     card.addEventListener('click', (e) => {
-      // 如果点击的是链接，不处理
-      if (e.target.tagName === 'A' || e.target.closest('a')) return;
+      // 如果点击的是链接或图片，不处理
+      if (e.target.tagName === 'A' || e.target.tagName === 'IMG' || e.target.closest('a')) return;
       window.open(`https://steamcommunity.com${review.url}`, '_blank');
     });
 
@@ -2100,7 +2123,7 @@ class UIRenderer {
    * 批量渲染评测卡片
    * @param {Array} reviews - 评测数据数组
    */
-  renderAll(reviews) {
+  async renderAll(reviews) {
     if (!this.container) {
       this.logger.error('容器未初始化');
       return;
@@ -2114,10 +2137,11 @@ class UIRenderer {
       return;
     }
 
-    reviews.forEach(review => {
-      const card = this.renderCard(review);
+    // 逐个渲染（异步处理截图）
+    for (const review of reviews) {
+      const card = await this.renderCard(review);
       this.container.appendChild(card);
-    });
+    }
 
     this.logger.info(`渲染完成，共 ${reviews.length} 条评测`);
   }
@@ -2126,10 +2150,10 @@ class UIRenderer {
    * 追加单个评测卡片（用于逐步显示）
    * @param {Object} review - 评测数据
    */
-  appendCard(review) {
+  async appendCard(review) {
     if (!this.container) return;
 
-    const card = this.renderCard(review);
+    const card = await this.renderCard(review);
     this.container.appendChild(card);
   }
 
@@ -2293,6 +2317,112 @@ class UIRenderer {
     }
 
     return result;
+  }
+
+  /**
+   * 处理评测内容中的截图链接，替换为实际图片
+   * @param {string} content - 原始评测内容HTML
+   * @returns {Promise<string>} 处理后的HTML
+   */
+  async processScreenshots(content) {
+    if (!content) return content;
+
+    // 匹配完整的 <a> 标签包裹的 Steam 截图链接
+    // 原始格式: <a class="bb_link" href="https://steamcommunity.com/sharedfiles/filedetails/?id=xxx" target="_blank" ...>https://steamcommunity.com/sharedfiles/filedetails/?id=xxx</a>
+    const screenshotLinkRegex = /<a[^>]*href="(https:\/\/steamcommunity\.com\/sharedfiles\/filedetails\/\?id=(\d+))"[^>]*>.*?<\/a>/g;
+    const matches = [...content.matchAll(screenshotLinkRegex)];
+
+    if (matches.length === 0) return content;
+
+    this.logger.info(`发现 ${matches.length} 个截图链接，正在获取图片...`);
+
+    // 并行获取所有截图的图片URL
+    const imageUrls = await Promise.all(
+      matches.map(match => this.fetchScreenshotImage(match[2])) // match[2] 是文件ID
+    );
+
+    // 替换链接为图片
+    let processedContent = content;
+    matches.forEach((match, index) => {
+      const imageUrl = imageUrls[index];
+      const originalUrl = match[1]; // 原始链接URL
+      const fullMatch = match[0];   // 完整的 <a> 标签
+      if (imageUrl) {
+        // 替换整个 <a> 标签为图片容器
+        const imgHtml = `<div class="frf_screenshot_container"><a href="${originalUrl}" target="_blank"><img src="${imageUrl}" class="frf_screenshot_img" alt="Steam 截图"></a></div>`;
+        processedContent = processedContent.replace(fullMatch, imgHtml);
+      }
+      // 如果获取失败，保留原链接
+    });
+
+    return processedContent;
+  }
+
+  /**
+   * 获取截图页面的图片URL
+   * @param {string} fileId - 截图文件ID
+   * @returns {Promise<string|null>} 图片URL或null
+   */
+  async fetchScreenshotImage(fileId) {
+    const url = `https://steamcommunity.com/sharedfiles/filedetails/?id=${fileId}`;
+    const retryDelay = 10000;    // 重试等待时间（10秒）
+    const maxRetryDuration = 60000; // 最大重试时长（1分钟）
+    const requestStartTime = Date.now();
+
+    while (true) {
+      try {
+        const response = await fetch(url, {
+          credentials: 'include',
+          redirect: 'follow'
+        });
+
+        // 429 限流处理：无限重试，最多1分钟
+        if (response.status === 429) {
+          const totalElapsed = Date.now() - requestStartTime;
+          if (totalElapsed < maxRetryDuration) {
+            this.logger.info(`截图 ${fileId} 遇到 429 限流，等待 ${retryDelay/1000}s 后重试...`);
+            await new Promise(r => setTimeout(r, retryDelay));
+            continue;
+          } else {
+            this.logger.warn(`截图 ${fileId} 获取失败：超过最大重试时长`);
+            return null;
+          }
+        }
+
+        if (!response.ok) {
+          this.logger.warn(`截图 ${fileId} 获取失败：HTTP ${response.status}`);
+          return null;
+        }
+
+        const html = await response.text();
+
+        // 从 og:image 提取图片URL
+        const ogImageMatch = html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/);
+        if (ogImageMatch) {
+          // 解码HTML实体
+          let imageUrl = ogImageMatch[1].replace(/&amp;/g, '&');
+          // 调整图片尺寸参数为更合适的预览尺寸
+          imageUrl = imageUrl.replace(/imw=\d+/, 'imw=637').replace(/imh=\d+/, 'imh=358');
+          this.logger.info(`截图 ${fileId} 图片URL获取成功`);
+          return imageUrl;
+        }
+
+        // 备选：从 actualmediactn 提取
+        const actualMediaMatch = html.match(/class="actualmediactn"[^>]*>[\s\S]*?<img[^>]+src="([^"]+)"/);
+        if (actualMediaMatch) {
+          let imageUrl = actualMediaMatch[1].replace(/&amp;/g, '&');
+          this.logger.info(`截图 ${fileId} 图片URL获取成功（备选方式）`);
+          return imageUrl;
+        }
+
+        this.logger.warn(`截图 ${fileId} 未找到图片URL`);
+        return null;
+
+      } catch (error) {
+        this.logger.error(`截图 ${fileId} 获取出错：${error.message}`);
+        return null;
+      }
+    }
   }
 
   /**
@@ -2604,6 +2734,29 @@ class UIRenderer {
         overflow-wrap: break-word;
       }
 
+      /* 截图容器 */
+      .frf_screenshot_container {
+        margin: 12px 0;
+        border-radius: 4px;
+        overflow: hidden;
+        background: rgba(0, 0, 0, 0.2);
+      }
+
+      .frf_screenshot_container a {
+        display: block;
+      }
+
+      .frf_screenshot_img {
+        width: 100%;
+        height: auto;
+        display: block;
+        transition: opacity 0.2s;
+      }
+
+      .frf_screenshot_img:hover {
+        opacity: 0.9;
+      }
+
       /* 底部用户信息栏 */
       .frf_author_row {
         display: flex;
@@ -2645,13 +2798,13 @@ class UIRenderer {
         object-fit: cover;
       }
 
-      /* 头像框：绝对定位覆盖在头像上方 */
+      /* 头像框：绝对定位覆盖在头像上方，按官方比例放大约1.21倍 */
       .frf_avatar_frame {
         position: absolute;
-        top: 0;
-        left: 0;
-        width: 32px;
-        height: 32px;
+        top: -4px;
+        left: -4px;
+        width: 40px;
+        height: 40px;
         pointer-events: none;
         z-index: 1;
       }
@@ -3085,7 +3238,14 @@ class SettingsPanel {
           <!-- 缓存管理 -->
           <div class="frf_settings_section">
             <h3>缓存管理</h3>
-            <p class="frf_section_desc">FRF 会缓存好友的评测数据，避免每次访问游戏页面都重新搜索。缓存自动构建，7 天后过期。</p>
+            <p class="frf_section_desc">FRF 会缓存好友的评测数据，避免每次访问游戏页面都重新搜索。缓存自动构建。</p>
+            <div class="frf_settings_row frf_settings_row_vertical">
+              <div class="frf_row_header">
+                <label for="frf_cache_days">缓存有效期（天）</label>
+                <input type="number" id="frf_cache_days" min="0" max="7" value="3">
+              </div>
+              <span class="frf_input_desc">可填 0-7，填 0 表示不缓存即每次都重新搜索，推荐值为 3</span>
+            </div>
             <div class="frf_settings_info" id="frf_cache_info">
               <div class="frf_info_loading">正在加载缓存信息...</div>
             </div>
@@ -3302,6 +3462,7 @@ class SettingsPanel {
     // 常规设置
     this.panelElement.querySelector('#frf_render_batch').value = settings.renderBatch || 3;
     this.panelElement.querySelector('#frf_content_truncate').value = typeof settings.contentTruncate === 'number' ? settings.contentTruncate : 300;
+    this.panelElement.querySelector('#frf_cache_days').value = typeof settings.cacheDays === 'number' ? settings.cacheDays : 3;
 
     // 高级设置
     if (window.FRF && window.FRF._quickConfig) {
@@ -3332,6 +3493,7 @@ class SettingsPanel {
     // 常规设置
     const renderBatch = parseInt(this.panelElement.querySelector('#frf_render_batch').value, 10);
     const contentTruncate = parseInt(this.panelElement.querySelector('#frf_content_truncate').value, 10);
+    const cacheDays = parseInt(this.panelElement.querySelector('#frf_cache_days').value, 10);
 
     // 高级设置
     const batchSize = parseInt(this.panelElement.querySelector('#frf_batch_size').value, 10);
@@ -3347,6 +3509,11 @@ class SettingsPanel {
 
     if (contentTruncate < 0 || contentTruncate > 8000) {
       this.showToast('截断长度必须在 0-8000 之间', 'error');
+      return;
+    }
+
+    if (cacheDays < 0 || cacheDays > 7) {
+      this.showToast('缓存有效期必须在 0-7 之间', 'error');
       return;
     }
 
@@ -3374,8 +3541,12 @@ class SettingsPanel {
       // 常规设置（存储到 FRF 对象）
       window.FRF._uiConfig = {
         renderBatch,
-        contentTruncate
+        contentTruncate,
+        cacheDays
       };
+
+      // 更新缓存有效期配置
+      window.FRF._cacheDays = cacheDays;
     }
 
     // 保存到 localStorage
@@ -3383,6 +3554,7 @@ class SettingsPanel {
       // 常规
       renderBatch,
       contentTruncate,
+      cacheDays,
       // 高级
       batchSize,
       delay,
@@ -3391,7 +3563,7 @@ class SettingsPanel {
     });
 
     this.showToast('设置已保存', 'success');
-    this.logger.info('设置已保存', { renderBatch, contentTruncate, batchSize, delay, debugMode, quickDebug });
+    this.logger.info('设置已保存', { renderBatch, contentTruncate, cacheDays, batchSize, delay, debugMode, quickDebug });
   }
 
   /**
@@ -3401,6 +3573,7 @@ class SettingsPanel {
     // 常规设置默认值
     this.panelElement.querySelector('#frf_render_batch').value = 3;
     this.panelElement.querySelector('#frf_content_truncate').value = 300;
+    this.panelElement.querySelector('#frf_cache_days').value = 3;
 
     // 高级设置默认值
     this.panelElement.querySelector('#frf_batch_size').value = 30;
@@ -3642,8 +3815,12 @@ class SettingsPanel {
       // 常规设置
       window.FRF._uiConfig = {
         renderBatch: settings.renderBatch || 3,
-        contentTruncate: typeof settings.contentTruncate === 'number' ? settings.contentTruncate : 300
+        contentTruncate: typeof settings.contentTruncate === 'number' ? settings.contentTruncate : 300,
+        cacheDays: typeof settings.cacheDays === 'number' ? settings.cacheDays : 3
       };
+
+      // 缓存有效期配置
+      window.FRF._cacheDays = typeof settings.cacheDays === 'number' ? settings.cacheDays : 3;
 
       this.logger.info('已应用保存的设置', settings);
     }
@@ -4389,6 +4566,9 @@ if (typeof window !== 'undefined') {
       debug: false
     },
 
+    // 缓存有效期（天数），0表示不缓存，默认3天
+    _cacheDays: 3,
+
     /**
      * 设置快速模式参数
      * @param {Object} config - { batchSize, delay, debug }
@@ -4633,12 +4813,12 @@ if (typeof window !== 'undefined') {
 
       console.log(`📊 开始处理 ${total} 个好友...`);
 
-      // 分批渲染函数
-      const flushRenderQueue = () => {
+      // 分批渲染函数（异步处理截图）
+      const flushRenderQueue = async () => {
         if (pendingRender.length > 0 && this._uiRenderer) {
-          pendingRender.forEach(review => {
-            this._uiRenderer.appendCard(review);
-          });
+          for (const review of pendingRender) {
+            await this._uiRenderer.appendCard(review);
+          }
           console.log(`🎨 渲染了 ${pendingRender.length} 篇评测，共 ${reviews.length} 篇`);
           pendingRender.length = 0; // 清空队列
         }
@@ -4666,15 +4846,16 @@ if (typeof window !== 'undefined') {
         );
 
         // 收集有效结果
-        batchResults.filter(r => r !== null).forEach(review => {
+        const validResults = batchResults.filter(r => r !== null);
+        for (const review of validResults) {
           reviews.push(review);
           pendingRender.push(review);
 
           // 每满5篇就渲染一次
           if (pendingRender.length >= RENDER_BATCH_SIZE) {
-            flushRenderQueue();
+            await flushRenderQueue();
           }
-        });
+        }
 
         current += batch.length;
         if (this._uiRenderer) {
@@ -4688,7 +4869,7 @@ if (typeof window !== 'undefined') {
       }
 
       // 渲染剩余的评测
-      flushRenderQueue();
+      await flushRenderQueue();
 
       // 隐藏加载状态
       if (this._uiRenderer) {
@@ -4718,12 +4899,12 @@ if (typeof window !== 'undefined') {
 
       console.log(`📥 获取 ${total} 条评测的详细数据...`);
 
-      // 分批渲染函数
-      const flushRenderQueue = () => {
+      // 分批渲染函数（异步处理截图）
+      const flushRenderQueue = async () => {
         if (pendingRender.length > 0 && this._uiRenderer) {
-          pendingRender.forEach(review => {
-            this._uiRenderer.appendCard(review);
-          });
+          for (const review of pendingRender) {
+            await this._uiRenderer.appendCard(review);
+          }
           console.log(`🎨 渲染了 ${pendingRender.length} 篇评测，共 ${reviews.length} 篇`);
           pendingRender.length = 0; // 清空队列
         }
@@ -4755,15 +4936,16 @@ if (typeof window !== 'undefined') {
         );
 
         // 收集有效结果
-        batchResults.filter(r => r !== null).forEach(review => {
+        const validResults = batchResults.filter(r => r !== null);
+        for (const review of validResults) {
           reviews.push(review);
           pendingRender.push(review);
 
           // 每满5篇就渲染一次
           if (pendingRender.length >= RENDER_BATCH_SIZE) {
-            flushRenderQueue();
+            await flushRenderQueue();
           }
-        });
+        }
 
         current += batch.length;
         if (this._uiRenderer) {
@@ -4777,7 +4959,7 @@ if (typeof window !== 'undefined') {
       }
 
       // 渲染剩余的评测
-      flushRenderQueue();
+      await flushRenderQueue();
 
       // 隐藏加载状态
       if (this._uiRenderer) {

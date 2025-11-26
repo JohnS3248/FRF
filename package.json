@@ -1,6 +1,6 @@
 {
   "name": "friend-review-finder",
-  "version": "5.2.0",
+  "version": "5.2.1",
   "description": "Fix Steam friend reviews 500 error by rebuilding review list",
   "main": "dist/steam-friend-reviews-fixer.user.js",
   "scripts": {

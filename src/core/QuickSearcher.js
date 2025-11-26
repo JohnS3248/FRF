@@ -181,14 +181,19 @@ class QuickSearcher {
    *
    * @param {string} steamId - 好友 Steam ID
    * @param {boolean} returnRaw - 是否返回原始数据（包含HTML）
-   * @param {number} retryCount - 当前重试次数（内部使用）
+   * @param {number} requestStartTime - 首次请求时间戳（内部使用）
    * @returns {Promise<Object|null>} 评测数据或 null
    */
-  async checkFriendReview(steamId, returnRaw = false, retryCount = 0) {
+  async checkFriendReview(steamId, returnRaw = false, requestStartTime = null) {
     const url = `https://steamcommunity.com/profiles/${steamId}/recommended/${this.appId}/`;
     const startTime = Date.now();
-    const maxRetries = 3;        // 最大重试次数
     const retryDelay = 10000;    // 重试等待时间（10秒）
+    const maxRetryDuration = 60000; // 最大重试时长（1分钟）
+
+    // 记录首次请求时间
+    if (requestStartTime === null) {
+      requestStartTime = startTime;
+    }
 
     try {
       const response = await fetch(url, {
@@ -198,17 +203,18 @@ class QuickSearcher {
 
       const elapsed = Date.now() - startTime;
 
-      // 429 限流处理：等待后重试
+      // 429 限流处理：无限重试，最多1分钟
       if (response.status === 429) {
-        if (retryCount < maxRetries) {
+        const totalElapsed = Date.now() - requestStartTime;
+        if (totalElapsed < maxRetryDuration) {
           if (this.debugMode) {
-            console.log(`[DEBUG] ${steamId} | 429 限流，等待 ${retryDelay/1000}s 后重试 (${retryCount + 1}/${maxRetries})`);
+            console.log(`[DEBUG] ${steamId} | 429 限流，等待 ${retryDelay/1000}s 后重试 (已用时 ${Math.round(totalElapsed/1000)}s)`);
           }
           await this.sleep(retryDelay);
-          return this.checkFriendReview(steamId, returnRaw, retryCount + 1);
+          return this.checkFriendReview(steamId, returnRaw, requestStartTime);
         } else {
           if (this.debugMode) {
-            console.log(`[DEBUG] ${steamId} | 429 限流，已达最大重试次数`);
+            console.log(`[DEBUG] ${steamId} | 429 限流，已超过最大重试时长 ${maxRetryDuration/1000}s`);
           }
           return null;
         }
