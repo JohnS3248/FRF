@@ -40,12 +40,17 @@ class ReviewExtractor {
   extractFull(html, steamId, appId) {
     // 提取头像和头像框
     const avatarData = this.extractUserAvatar(html);
+    // 提取评测ID（用于投票）
+    const recommendationId = this.extractRecommendationId(html);
+    // 提取投票状态
+    const voteStatus = this.extractVoteStatus(html, recommendationId);
 
     const reviewData = {
       // 基础信息
       steamId,
       appId,
       url: Constants.PROFILE_GAME_REVIEW_URL(steamId, appId),
+      recommendationId,
 
       // 评测信息
       isPositive: this.extractRecommendation(html),
@@ -68,7 +73,12 @@ class ReviewExtractor {
       // 互动数据
       commentCount: this.extractCommentCount(html),
       awardCount: this.extractAwardCount(html),
-      awards: this.extractAwards(html)  // 奖励图标列表
+      awards: this.extractAwards(html),  // 奖励图标列表
+
+      // 投票状态（用户是否已投票）
+      votedUp: voteStatus.votedUp,
+      votedDown: voteStatus.votedDown,
+      votedFunny: voteStatus.votedFunny
     };
 
     this.logger.debug('提取完整评测数据', {
@@ -80,6 +90,83 @@ class ReviewExtractor {
     });
 
     return reviewData;
+  }
+
+  // ==================== 评测ID提取 ====================
+
+  /**
+   * 提取评测的 recommendationid（用于投票API）
+   * 从页面中的投票按钮 onclick 事件中提取
+   * 格式：UserReviewVoteUp( 1, '...', '202633885' )
+   */
+  extractRecommendationId(html) {
+    const patterns = [
+      // 从投票按钮提取
+      /UserReviewVoteUp\([^,]+,\s*'[^']*',\s*'(\d+)'\s*\)/,
+      /UserReviewVoteDown\([^,]+,\s*'[^']*',\s*'(\d+)'\s*\)/,
+      /UserReviewVoteTag\([^,]+,\s*'[^']*',\s*'(\d+)'/,
+      // 从举报按钮提取
+      /UserReview_Report\(\s*'(\d+)'/,
+      // 从奖励按钮提取
+      /UserReview_Award\([^,]+,\s*'[^']*',\s*'(\d+)'/,
+      // 从按钮ID提取
+      /RecommendationVoteUpBtn(\d+)/
+    ];
+
+    for (const pattern of patterns) {
+      const match = html.match(pattern);
+      if (match) {
+        this.logger.debug('提取到 recommendationId:', match[1]);
+        return match[1];
+      }
+    }
+
+    this.logger.warn('未能提取 recommendationId');
+    return null;
+  }
+
+  /**
+   * 提取用户对该评测的投票状态
+   * 检查按钮是否有 active 类
+   * @param {string} html - 评测页面HTML
+   * @param {string} recommendationId - 评测ID
+   * @returns {Object} { votedUp: boolean, votedDown: boolean, votedFunny: boolean }
+   */
+  extractVoteStatus(html, recommendationId) {
+    const status = {
+      votedUp: false,
+      votedDown: false,
+      votedFunny: false
+    };
+
+    if (!recommendationId) return status;
+
+    // Steam HTML 结构：class="..." id="RecommendationVoteUpBtn..."
+    // class 在 id 之前，所以需要匹配 class 中包含 active 且同一标签内有对应 id
+
+    // 检查"是"按钮是否有 active 类
+    // 格式：class="btn_grey_grey btn_small_thin ico_hover active" ... id="RecommendationVoteUpBtn202633885"
+    const upBtnPattern = new RegExp(`class="[^"]*active[^"]*"[^>]*id="RecommendationVoteUpBtn${recommendationId}"`);
+    if (upBtnPattern.test(html)) {
+      status.votedUp = true;
+      this.logger.debug('用户已投"是"');
+    }
+
+    // 检查"否"按钮
+    const downBtnPattern = new RegExp(`class="[^"]*active[^"]*"[^>]*id="RecommendationVoteDownBtn${recommendationId}"`);
+    if (downBtnPattern.test(html)) {
+      status.votedDown = true;
+      this.logger.debug('用户已投"否"');
+    }
+
+    // 检查"欢乐"按钮
+    const funnyBtnPattern = new RegExp(`class="[^"]*active[^"]*"[^>]*id="RecommendationVoteTagBtn${recommendationId}_1"`);
+    if (funnyBtnPattern.test(html)) {
+      status.votedFunny = true;
+      this.logger.debug('用户已投"欢乐"');
+    }
+
+    return status;
   }
 
   // ==================== 用户信息提取 ====================

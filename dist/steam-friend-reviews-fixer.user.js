@@ -360,12 +360,17 @@ class ReviewExtractor {
   extractFull(html, steamId, appId) {
     // 提取头像和头像框
     const avatarData = this.extractUserAvatar(html);
+    // 提取评测ID（用于投票）
+    const recommendationId = this.extractRecommendationId(html);
+    // 提取投票状态
+    const voteStatus = this.extractVoteStatus(html, recommendationId);
 
     const reviewData = {
       // 基础信息
       steamId,
       appId,
       url: Constants.PROFILE_GAME_REVIEW_URL(steamId, appId),
+      recommendationId,
 
       // 评测信息
       isPositive: this.extractRecommendation(html),
@@ -388,7 +393,12 @@ class ReviewExtractor {
       // 互动数据
       commentCount: this.extractCommentCount(html),
       awardCount: this.extractAwardCount(html),
-      awards: this.extractAwards(html)  // 奖励图标列表
+      awards: this.extractAwards(html),  // 奖励图标列表
+
+      // 投票状态（用户是否已投票）
+      votedUp: voteStatus.votedUp,
+      votedDown: voteStatus.votedDown,
+      votedFunny: voteStatus.votedFunny
     };
 
     this.logger.debug('提取完整评测数据', {
@@ -400,6 +410,83 @@ class ReviewExtractor {
     });
 
     return reviewData;
+  }
+
+  // ==================== 评测ID提取 ====================
+
+  /**
+   * 提取评测的 recommendationid（用于投票API）
+   * 从页面中的投票按钮 onclick 事件中提取
+   * 格式：UserReviewVoteUp( 1, '...', '202633885' )
+   */
+  extractRecommendationId(html) {
+    const patterns = [
+      // 从投票按钮提取
+      /UserReviewVoteUp\([^,]+,\s*'[^']*',\s*'(\d+)'\s*\)/,
+      /UserReviewVoteDown\([^,]+,\s*'[^']*',\s*'(\d+)'\s*\)/,
+      /UserReviewVoteTag\([^,]+,\s*'[^']*',\s*'(\d+)'/,
+      // 从举报按钮提取
+      /UserReview_Report\(\s*'(\d+)'/,
+      // 从奖励按钮提取
+      /UserReview_Award\([^,]+,\s*'[^']*',\s*'(\d+)'/,
+      // 从按钮ID提取
+      /RecommendationVoteUpBtn(\d+)/
+    ];
+
+    for (const pattern of patterns) {
+      const match = html.match(pattern);
+      if (match) {
+        this.logger.debug('提取到 recommendationId:', match[1]);
+        return match[1];
+      }
+    }
+
+    this.logger.warn('未能提取 recommendationId');
+    return null;
+  }
+
+  /**
+   * 提取用户对该评测的投票状态
+   * 检查按钮是否有 active 类
+   * @param {string} html - 评测页面HTML
+   * @param {string} recommendationId - 评测ID
+   * @returns {Object} { votedUp: boolean, votedDown: boolean, votedFunny: boolean }
+   */
+  extractVoteStatus(html, recommendationId) {
+    const status = {
+      votedUp: false,
+      votedDown: false,
+      votedFunny: false
+    };
+
+    if (!recommendationId) return status;
+
+    // Steam HTML 结构：class="..." id="RecommendationVoteUpBtn..."
+    // class 在 id 之前，所以需要匹配 class 中包含 active 且同一标签内有对应 id
+
+    // 检查"是"按钮是否有 active 类
+    // 格式：class="btn_grey_grey btn_small_thin ico_hover active" ... id="RecommendationVoteUpBtn202633885"
+    const upBtnPattern = new RegExp(`class="[^"]*active[^"]*"[^>]*id="RecommendationVoteUpBtn${recommendationId}"`);
+    if (upBtnPattern.test(html)) {
+      status.votedUp = true;
+      this.logger.debug('用户已投"是"');
+    }
+
+    // 检查"否"按钮
+    const downBtnPattern = new RegExp(`class="[^"]*active[^"]*"[^>]*id="RecommendationVoteDownBtn${recommendationId}"`);
+    if (downBtnPattern.test(html)) {
+      status.votedDown = true;
+      this.logger.debug('用户已投"否"');
+    }
+
+    // 检查"欢乐"按钮
+    const funnyBtnPattern = new RegExp(`class="[^"]*active[^"]*"[^>]*id="RecommendationVoteTagBtn${recommendationId}_1"`);
+    if (funnyBtnPattern.test(html)) {
+      status.votedFunny = true;
+      this.logger.debug('用户已投"欢乐"');
+    }
+
+    return status;
   }
 
   // ==================== 用户信息提取 ====================
@@ -1977,9 +2064,15 @@ class UIRenderer {
 
     // 添加点击事件（打开评测详情）
     card.addEventListener('click', (e) => {
-      // 如果点击的是链接或图片，不处理
-      if (e.target.tagName === 'A' || e.target.tagName === 'IMG' || e.target.closest('a')) return;
+      // 如果点击的是链接、图片或按钮，不处理
+      if (e.target.tagName === 'A' || e.target.tagName === 'IMG' || e.target.closest('a') || e.target.closest('button')) return;
       window.open(`https://steamcommunity.com${review.url}`, '_blank');
+    });
+
+    // 绑定投票按钮点击事件
+    const voteButtons = card.querySelectorAll('.frf_vote_btn');
+    voteButtons.forEach(btn => {
+      btn.addEventListener('click', (e) => this.handleVoteClick(e));
     });
 
     return card;
@@ -2092,6 +2185,27 @@ class UIRenderer {
 
         <!-- 评测内容 -->
         <div class="frf_content_row">${displayContent}</div>
+
+        <!-- 投票按钮栏 -->
+        ${review.recommendationId ? `
+        <div class="frf_vote_row">
+          <span class="frf_vote_label">这篇评测是否有价值？</span>
+          <div class="frf_vote_buttons">
+            <button class="frf_vote_btn frf_vote_yes${review.votedUp ? ' voted' : ''}" data-action="rate" data-value="true" data-id="${review.recommendationId}" title="是">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>
+              <span>是</span>
+            </button>
+            <button class="frf_vote_btn frf_vote_no${review.votedDown ? ' voted' : ''}" data-action="rate" data-value="false" data-id="${review.recommendationId}" title="否">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>
+              <span>否</span>
+            </button>
+            <button class="frf_vote_btn frf_vote_funny${review.votedFunny ? ' voted' : ''}" data-action="funny" data-value="true" data-id="${review.recommendationId}" title="欢乐">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z"/></svg>
+              <span>欢乐</span>
+            </button>
+          </div>
+        </div>
+        ` : ''}
 
         <!-- 底部用户信息栏 -->
         <div class="frf_author_row">
@@ -2418,6 +2532,133 @@ class UIRenderer {
         this.logger.error(`截图 ${fileId} 获取出错：${error.message}`);
         return null;
       }
+    }
+  }
+
+  // ==================== 投票功能 ====================
+
+  /**
+   * 获取 sessionid（从 Cookie 中读取）
+   * @returns {string|null}
+   */
+  getSessionId() {
+    const match = document.cookie.match(/sessionid=([^;]+)/);
+    return match ? match[1] : null;
+  }
+
+  /**
+   * 投票：是/否
+   * @param {string} recommendationId - 评测ID
+   * @param {boolean} isPositive - true=是（有价值），false=否
+   * @returns {Promise<Object>} API 响应
+   */
+  async voteRate(recommendationId, isPositive) {
+    const sessionId = this.getSessionId();
+    if (!sessionId) {
+      this.logger.error('无法获取 sessionid，可能未登录');
+      return { success: false, error: '未登录' };
+    }
+
+    try {
+      const response = await fetch(`https://steamcommunity.com/userreviews/rate/${recommendationId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: `rateup=${isPositive}&sessionid=${sessionId}`,
+        credentials: 'include'
+      });
+
+      const result = await response.json();
+      this.logger.info(`投票${isPositive ? '是' : '否'}成功:`, result);
+      return { success: true, data: result };
+    } catch (error) {
+      this.logger.error('投票失败:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * 投票：欢乐
+   * @param {string} recommendationId - 评测ID
+   * @param {boolean} vote - true=投票，false=取消
+   * @returns {Promise<Object>} API 响应
+   */
+  async voteFunny(recommendationId, vote = true) {
+    const sessionId = this.getSessionId();
+    if (!sessionId) {
+      this.logger.error('无法获取 sessionid，可能未登录');
+      return { success: false, error: '未登录' };
+    }
+
+    try {
+      const response = await fetch(`https://steamcommunity.com/userreviews/votetag/${recommendationId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: `tagid=1&rateup=${vote}&sessionid=${sessionId}`,
+        credentials: 'include'
+      });
+
+      const result = await response.json();
+      this.logger.info(`投票欢乐${vote ? '' : '取消'}成功:`, result);
+      return { success: true, data: result };
+    } catch (error) {
+      this.logger.error('投票欢乐失败:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * 处理投票按钮点击
+   * @param {Event} event - 点击事件
+   */
+  async handleVoteClick(event) {
+    const btn = event.target.closest('.frf_vote_btn');
+    if (!btn) return;
+
+    // 阻止事件冒泡到卡片
+    event.stopPropagation();
+
+    const action = btn.dataset.action;
+    const value = btn.dataset.value === 'true';
+    const recommendationId = btn.dataset.id;
+
+    if (!recommendationId) {
+      this.logger.error('缺少 recommendationId');
+      return;
+    }
+
+    // 添加 loading 状态
+    btn.classList.add('loading');
+
+    let result;
+    if (action === 'rate') {
+      result = await this.voteRate(recommendationId, value);
+    } else if (action === 'funny') {
+      result = await this.voteFunny(recommendationId, value);
+    }
+
+    // 移除 loading 状态
+    btn.classList.remove('loading');
+
+    if (result && result.success) {
+      // 获取同一卡片内的所有投票按钮
+      const voteRow = btn.closest('.frf_vote_row');
+      const yesBtn = voteRow.querySelector('.frf_vote_yes');
+      const noBtn = voteRow.querySelector('.frf_vote_no');
+      const funnyBtn = voteRow.querySelector('.frf_vote_funny');
+
+      // 三者互斥：点击任何一个，取消其他两个
+      yesBtn.classList.remove('voted');
+      noBtn.classList.remove('voted');
+      funnyBtn.classList.remove('voted');
+
+      // 激活当前点击的按钮
+      btn.classList.add('voted');
     }
   }
 
@@ -2753,6 +2994,95 @@ class UIRenderer {
 
       .frf_screenshot_img:hover {
         opacity: 0.9;
+      }
+
+      /* 投票按钮栏 */
+      .frf_vote_row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 14px;
+        border-top: 1px solid rgba(255, 255, 255, 0.05);
+        background: rgba(0, 0, 0, 0.15);
+      }
+
+      .frf_vote_label {
+        font-size: 12px;
+        color: #8f98a0;
+      }
+
+      .frf_vote_buttons {
+        display: flex;
+        gap: 8px;
+      }
+
+      .frf_vote_btn {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 6px 12px;
+        border: none;
+        border-radius: 2px;
+        background: rgba(103, 193, 245, 0.15);
+        color: #67c1f5;
+        font-size: 12px;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+
+      .frf_vote_btn:hover {
+        background: rgba(103, 193, 245, 0.3);
+      }
+
+      .frf_vote_btn:active {
+        transform: scale(0.95);
+      }
+
+      .frf_vote_btn.voted {
+        background: #67c1f5;
+        color: #1b2838;
+      }
+
+      .frf_vote_btn.loading {
+        opacity: 0.6;
+        pointer-events: none;
+      }
+
+      .frf_vote_btn svg {
+        width: 14px;
+        height: 14px;
+        fill: currentColor;
+      }
+
+
+      .frf_vote_yes:hover {
+        background: rgba(76, 175, 80, 0.3);
+        color: #4caf50;
+      }
+
+      .frf_vote_yes.voted {
+        background: #4caf50;
+        color: #fff;
+      }
+
+      .frf_vote_no:hover {
+        background: rgba(244, 67, 54, 0.3);
+        color: #f44336;
+      }
+
+      .frf_vote_no.voted {
+        background: #f44336;
+        color: #fff;
+      }
+
+      .frf_vote_funny:hover {
+        background: rgba(255, 193, 7, 0.3);
+        color: #ffc107;
+      }
+
+      .frf_vote_funny.voted {
+        background: #ffc107;
+        color: #1b2838;
       }
 
       /* 底部用户信息栏 */
