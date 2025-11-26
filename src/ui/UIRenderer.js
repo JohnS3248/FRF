@@ -981,13 +981,13 @@ class UIRenderer {
         object-fit: cover;
       }
 
-      /* 头像框：绝对定位覆盖在头像上方 */
+      /* 头像框：绝对定位覆盖在头像上方，按官方比例放大约1.21倍 */
       .frf_avatar_frame {
         position: absolute;
-        top: 0;
-        left: 0;
-        width: 32px;
-        height: 32px;
+        top: -4px;
+        left: -4px;
+        width: 40px;
+        height: 40px;
         pointer-events: none;
         z-index: 1;
       }
