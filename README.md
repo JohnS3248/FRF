@@ -6,7 +6,7 @@
 
 **Steam 好友评测修复工具** | **Steam Friend Reviews Fixer**
 
-[![Version](https://img.shields.io/badge/version-5.1.6-blue.svg)](https://github.com/JohnS3248/FRF/releases)
+[![Version](https://img.shields.io/badge/version-5.3.2-blue.svg)](https://github.com/JohnS3248/FRF/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Greasy Fork](https://img.shields.io/greasyfork/v/556679?label=Greasy%20Fork)](https://greasyfork.org/zh-CN/scripts/556679)
 
@@ -38,7 +38,9 @@
 
 **FRF 可以帮你修复这些问题，完整显示所有好友对该游戏的评测。**
 - FRF 可以主动帮你查找好友的评测并渲染显示
-- FRF 的渲染比官方的更好，可以显示发布时间、修改时间和评测时的小时数等信息
+- FRF 的渲染比官方的更好，可以显示发布时间、修改时间、评测时的小时数、头像框等信息
+- FRF 支持截图渲染，可以直接在评测卡片中查看好友分享的截图
+- FRF 支持评测投票，可以直接在卡片中对好友的评测进行「是/否/欢乐」投票
 - FRF 具有自定义设置，可以根据偏好选择自定义字数截断/全部显示
 - FRF 甚至可以刷新官方正常渲染的好友评测界面（仅「来自好友的评测」筛选可用）
 
@@ -95,8 +97,8 @@ FRF 还可以改变steam来自好友的评测的官方渲染,脚本的渲染相�
 
 - **首次访问**：约 40 秒完成搜索（取决于好友数量）
 - **再次访问**：秒加载（从缓存读取）
-- **后台更新**：缓存加载后自动检查是否有新评测
-- **缓存有效期**：7 天
+- **手动刷新**：点击「FRF 刷新」按钮重新获取最新数据
+- **缓存有效期**：可自定义（默认 7 天）
 
 #### 设置面板
 
@@ -108,7 +110,7 @@ FRF 还可以改变steam来自好友的评测的官方渲染,脚本的渲染相�
 |------|------|--------|
 | 每次渲染评测数 | 找到 N 篇评测后立即显示 | 3 |
 | 评测内容截断长度 | 评测文本最大显示字数（0 = 不截断） | 300 |
-| 后台静默更新 | 缓存加载后自动检查新评测 | 开启 |
+| 缓存有效期 | 缓存数据的保存时长 | 7 天 |
 
 **缓存管理**
 
@@ -122,8 +124,8 @@ FRF 还可以改变steam来自好友的评测的官方渲染,脚本的渲染相�
 
 | 选项 | 说明 | 默认值 |
 |------|------|--------|
-| 批次大小 | 每次并发请求的好友数量 | 30 |
-| 批次延迟 | 每批请求之间的等待时间 | 0ms |
+| 批次大小 | 每次并发请求的好友数量 | 15 |
+| 批次延迟 | 每批请求之间的等待时间 | 50ms |
 | 调试模式 | 在控制台显示详细日志 | 关闭 |
 
 ### 工作原理
@@ -188,7 +190,9 @@ When you see "XX friends recommend this game" on Steam store and click "View all
 
 **FRF fixes these issues and displays all your friends' reviews for the game.**
 - FRF proactively finds and renders your friends' reviews
-- FRF's rendering is better than Steam's official one, showing publish date, update date, hours at review time, etc.
+- FRF's rendering is better than Steam's official one, showing publish date, update date, hours at review time, avatar frames, etc.
+- FRF supports screenshot rendering - view screenshots shared by friends directly in the review card
+- FRF supports review voting - vote Yes/No/Funny on friends' reviews directly from the card
 - FRF has customizable settings - choose custom text truncation or show full content
 - FRF can even refresh pages where Steam's official rendering works (only for "Friends" filter)
 
@@ -245,8 +249,8 @@ Click "FRF Refresh" to force fetch the latest data.
 
 - **First visit**: ~40 seconds to scan (depends on friend count)
 - **Return visits**: Instant loading (from cache)
-- **Background updates**: Auto-checks for new reviews after cache load
-- **Cache duration**: 7 days
+- **Manual refresh**: Click "FRF Refresh" button to fetch latest data
+- **Cache duration**: Customizable (default 7 days)
 
 #### Settings Panel
 
@@ -258,7 +262,7 @@ Click "FRF Settings" to open the settings panel:
 |--------|-------------|---------|
 | Reviews per render | Display after finding N reviews | 3 |
 | Content truncate length | Max characters to show (0 = no truncation) | 300 |
-| Background update | Auto-check for new reviews | On |
+| Cache duration | How long to keep cached data | 7 days |
 
 **Cache Management**
 
@@ -272,8 +276,8 @@ Click "FRF Settings" to open the settings panel:
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| Batch size | Number of concurrent friend requests | 30 |
-| Batch delay | Wait time between batches | 0ms |
+| Batch size | Number of concurrent friend requests | 15 |
+| Batch delay | Wait time between batches | 50ms |
 | Debug mode | Show detailed logs in console | Off |
 
 ### How it Works

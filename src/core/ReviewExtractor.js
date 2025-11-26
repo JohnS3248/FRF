@@ -284,20 +284,34 @@ class ReviewExtractor {
 
   /**
    * 提取用户主页URL
+   * 从 profile_small_header_name 区域内提取评测作者的主页链接
    */
   extractUserProfileUrl(html, steamId) {
-    // 尝试从页面提取，如果失败则使用steamId构造
-    const match = html.match(/href="(https:\/\/steamcommunity\.com\/(?:profiles|id)\/[^"]+)"/);
-    if (match) {
-      // 提取基础URL（去掉后面的recommended等路径）
-      const url = match[1];
-      const baseMatch = url.match(/(https:\/\/steamcommunity\.com\/(?:profiles|id)\/[^\/]+)/);
-      if (baseMatch) {
-        return baseMatch[1];
+    // 精确匹配：从 profile_small_header_name 区域提取
+    // 格式：<span class="profile_small_header_name"><a class="whiteLink persona_name_text_content" href="https://steamcommunity.com/id/xxx">
+    const patterns = [
+      // 优先：从 profile_small_header_name 区域提取
+      /profile_small_header_name[\s\S]*?<a[^>]*href="(https:\/\/steamcommunity\.com\/(?:profiles|id)\/[^"]+)"/,
+      // 备选：从 persona_name_text_content 链接提取（排除 account_pulldown 等按钮）
+      /<a[^>]*class="[^"]*persona_name_text_content[^"]*"[^>]*href="(https:\/\/steamcommunity\.com\/(?:profiles|id)\/[^"]+)"/
+    ];
+
+    for (const pattern of patterns) {
+      const match = html.match(pattern);
+      if (match) {
+        // 提取基础URL（去掉后面的recommended等路径）
+        const url = match[1];
+        const baseMatch = url.match(/(https:\/\/steamcommunity\.com\/(?:profiles|id)\/[^\/]+)/);
+        if (baseMatch) {
+          this.logger.debug('提取用户主页URL:', baseMatch[1]);
+          return baseMatch[1];
+        }
+        return url;
       }
     }
 
     // 回退：使用steamId构造
+    this.logger.warn('未能提取用户主页URL，使用steamId构造');
     return `https://steamcommunity.com/profiles/${steamId}`;
   }
 
