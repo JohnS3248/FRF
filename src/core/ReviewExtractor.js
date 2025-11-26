@@ -38,6 +38,9 @@ class ReviewExtractor {
    * @returns {Object} 完整评测数据对象
    */
   extractFull(html, steamId, appId) {
+    // 提取头像和头像框
+    const avatarData = this.extractUserAvatar(html);
+
     const reviewData = {
       // 基础信息
       steamId,
@@ -52,7 +55,8 @@ class ReviewExtractor {
       updateDate: this.extractUpdateDate(html),
 
       // 用户信息（新增）
-      userAvatar: this.extractUserAvatar(html),
+      userAvatar: avatarData.avatarUrl,
+      avatarFrame: avatarData.frameUrl,
       userName: this.extractUserName(html),
       userProfileUrl: this.extractUserProfileUrl(html, steamId),
 
@@ -71,6 +75,7 @@ class ReviewExtractor {
       steamId,
       userName: reviewData.userName,
       isPositive: reviewData.isPositive,
+      hasFrame: !!reviewData.avatarFrame,
       contentLength: reviewData.reviewContent?.length || 0
     });
 
@@ -80,11 +85,76 @@ class ReviewExtractor {
   // ==================== 用户信息提取 ====================
 
   /**
-   * 提取用户头像URL
+   * 提取用户头像URL和头像框URL
+   * 使用 DOMParser 精确提取，避免并发时的头像串位问题
+   * @returns {Object} { avatarUrl: string|null, frameUrl: string|null }
    */
   extractUserAvatar(html) {
-    // 从 profile_small_header_avatar 区域提取头像
-    // <img src="https://avatars.fastly.steamstatic.com/xxx_medium.jpg">
+    // 使用 DOMParser 精确提取头像和头像框
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, 'text/html');
+
+      const playerAvatarContainer = doc.querySelector('.profile_small_header_avatar .playerAvatar');
+
+      if (playerAvatarContainer) {
+        let avatarUrl = null;
+        let frameUrl = null;
+
+        // 遍历容器的所有 img 子元素
+        const images = playerAvatarContainer.querySelectorAll('img');
+
+        for (const img of images) {
+          const src = img.getAttribute('src');
+
+          // 提取头像框图片（在 .profile_avatar_frame 内）
+          if (img.closest('.profile_avatar_frame')) {
+            if (src) {
+              frameUrl = src;
+              this.logger.debug('提取头像框:', src);
+            }
+            continue;
+          }
+
+          // 提取真实头像URL（包含 avatars 路径）
+          if (src && src.includes('avatars')) {
+            avatarUrl = src;
+            this.logger.debug('提取头像:', src);
+          }
+        }
+
+        if (avatarUrl) {
+          return { avatarUrl, frameUrl };
+        }
+      }
+
+      // 备用方案：直接查找图片
+      const allImages = doc.querySelectorAll('.profile_small_header_avatar img');
+      let avatarUrl = null;
+      let frameUrl = null;
+
+      for (const img of allImages) {
+        const src = img.getAttribute('src');
+
+        if (img.closest('.profile_avatar_frame')) {
+          if (src) frameUrl = src;
+          continue;
+        }
+
+        if (src && src.includes('avatars')) {
+          avatarUrl = src;
+        }
+      }
+
+      if (avatarUrl) {
+        this.logger.debug('DOMParser 提取成功（备用方案）');
+        return { avatarUrl, frameUrl };
+      }
+    } catch (e) {
+      this.logger.warn('DOMParser 提取头像失败，fallback 到正则', e);
+    }
+
+    // Fallback: 使用正则（兼容旧环境，不提取头像框）
     const patterns = [
       /profile_small_header_avatar[\s\S]*?<img[^>]*src="([^"]+_medium\.jpg)"/,
       /profile_small_header_avatar[\s\S]*?<img[^>]*src="([^"]+\.jpg)"/,
@@ -94,12 +164,13 @@ class ReviewExtractor {
     for (const pattern of patterns) {
       const match = html.match(pattern);
       if (match) {
-        return match[1];
+        this.logger.debug('正则提取头像成功');
+        return { avatarUrl: match[1], frameUrl: null };
       }
     }
 
     this.logger.warn('未能提取用户头像');
-    return null;
+    return { avatarUrl: null, frameUrl: null };
   }
 
   /**

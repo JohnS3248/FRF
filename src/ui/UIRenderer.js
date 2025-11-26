@@ -358,6 +358,24 @@ class UIRenderer {
     const avatarUrl = review.userAvatar ||
       'https://avatars.fastly.steamstatic.com/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_medium.jpg';
 
+    // 头像框（如果有）
+    const avatarFrameUrl = review.avatarFrame;
+
+    // 构建头像HTML（支持头像框）
+    let avatarHtml = '';
+    if (avatarFrameUrl) {
+      // 有头像框：使用双层结构
+      avatarHtml = `
+        <div class="frf_avatar_container">
+          <img src="${avatarUrl}" class="frf_avatar_img">
+          <img src="${avatarFrameUrl}" class="frf_avatar_frame">
+        </div>
+      `;
+    } else {
+      // 无头像框：普通单层头像
+      avatarHtml = `<img src="${avatarUrl}" class="frf_avatar_img">`;
+    }
+
     // 格式化日期显示（发布于 + 更新于）
     let dateText = `发布于：${review.publishDate}`;
     if (review.updateDate) {
@@ -396,7 +414,7 @@ class UIRenderer {
         <div class="frf_author_row">
           <div class="frf_author_left">
             <a href="${review.userProfileUrl}" class="frf_avatar_link">
-              <img src="${avatarUrl}" class="frf_avatar_img">
+              ${avatarHtml}
             </a>
             <div class="frf_author_info">
               <a href="${review.userProfileUrl}" class="frf_author_name">${review.userName}</a>
@@ -947,12 +965,31 @@ class UIRenderer {
         text-align: left;
       }
 
+      /* 头像容器（用于头像框场景） */
+      .frf_avatar_container {
+        position: relative;
+        width: 32px;
+        height: 32px;
+        display: block;
+      }
+
       .frf_avatar_img {
         width: 32px;
         height: 32px;
         display: block;
         margin: 0;
         object-fit: cover;
+      }
+
+      /* 头像框：绝对定位覆盖在头像上方 */
+      .frf_avatar_frame {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 32px;
+        height: 32px;
+        pointer-events: none;
+        z-index: 1;
       }
 
       .frf_author_info {

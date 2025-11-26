@@ -2,7 +2,7 @@
 // @name         Steam 好友评测修复工具
 // @name:en      Steam Friend Reviews Fixer
 // @namespace    https://github.com/JohnS3248/FRF
-// @version      5.1.6
+// @version      5.1.7
 // @description  自动修复 Steam 好友评测页面渲染 Bug，显示完整的好友评测列表
 // @description:en Auto-fix Steam friend reviews rendering bug, display complete friend review list
 // @author       JohnS3248
@@ -31,7 +31,7 @@
 
 const Constants = {
   // ==================== 版本信息 ====================
-  VERSION: '5.1.6',
+  VERSION: '5.1.7',
   CACHE_VERSION: 'v2', // 渐进式缓存版本
 
   // ==================== 请求配置 ====================
@@ -358,6 +358,9 @@ class ReviewExtractor {
    * @returns {Object} 完整评测数据对象
    */
   extractFull(html, steamId, appId) {
+    // 提取头像和头像框
+    const avatarData = this.extractUserAvatar(html);
+
     const reviewData = {
       // 基础信息
       steamId,
@@ -372,7 +375,8 @@ class ReviewExtractor {
       updateDate: this.extractUpdateDate(html),
 
       // 用户信息（新增）
-      userAvatar: this.extractUserAvatar(html),
+      userAvatar: avatarData.avatarUrl,
+      avatarFrame: avatarData.frameUrl,
       userName: this.extractUserName(html),
       userProfileUrl: this.extractUserProfileUrl(html, steamId),
 
@@ -391,6 +395,7 @@ class ReviewExtractor {
       steamId,
       userName: reviewData.userName,
       isPositive: reviewData.isPositive,
+      hasFrame: !!reviewData.avatarFrame,
       contentLength: reviewData.reviewContent?.length || 0
     });
 
@@ -400,11 +405,76 @@ class ReviewExtractor {
   // ==================== 用户信息提取 ====================
 
   /**
-   * 提取用户头像URL
+   * 提取用户头像URL和头像框URL
+   * 使用 DOMParser 精确提取，避免并发时的头像串位问题
+   * @returns {Object} { avatarUrl: string|null, frameUrl: string|null }
    */
   extractUserAvatar(html) {
-    // 从 profile_small_header_avatar 区域提取头像
-    // <img src="https://avatars.fastly.steamstatic.com/xxx_medium.jpg">
+    // 使用 DOMParser 精确提取头像和头像框
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, 'text/html');
+
+      const playerAvatarContainer = doc.querySelector('.profile_small_header_avatar .playerAvatar');
+
+      if (playerAvatarContainer) {
+        let avatarUrl = null;
+        let frameUrl = null;
+
+        // 遍历容器的所有 img 子元素
+        const images = playerAvatarContainer.querySelectorAll('img');
+
+        for (const img of images) {
+          const src = img.getAttribute('src');
+
+          // 提取头像框图片（在 .profile_avatar_frame 内）
+          if (img.closest('.profile_avatar_frame')) {
+            if (src) {
+              frameUrl = src;
+              this.logger.debug('提取头像框:', src);
+            }
+            continue;
+          }
+
+          // 提取真实头像URL（包含 avatars 路径）
+          if (src && src.includes('avatars')) {
+            avatarUrl = src;
+            this.logger.debug('提取头像:', src);
+          }
+        }
+
+        if (avatarUrl) {
+          return { avatarUrl, frameUrl };
+        }
+      }
+
+      // 备用方案：直接查找图片
+      const allImages = doc.querySelectorAll('.profile_small_header_avatar img');
+      let avatarUrl = null;
+      let frameUrl = null;
+
+      for (const img of allImages) {
+        const src = img.getAttribute('src');
+
+        if (img.closest('.profile_avatar_frame')) {
+          if (src) frameUrl = src;
+          continue;
+        }
+
+        if (src && src.includes('avatars')) {
+          avatarUrl = src;
+        }
+      }
+
+      if (avatarUrl) {
+        this.logger.debug('DOMParser 提取成功（备用方案）');
+        return { avatarUrl, frameUrl };
+      }
+    } catch (e) {
+      this.logger.warn('DOMParser 提取头像失败，fallback 到正则', e);
+    }
+
+    // Fallback: 使用正则（兼容旧环境，不提取头像框）
     const patterns = [
       /profile_small_header_avatar[\s\S]*?<img[^>]*src="([^"]+_medium\.jpg)"/,
       /profile_small_header_avatar[\s\S]*?<img[^>]*src="([^"]+\.jpg)"/,
@@ -414,12 +484,13 @@ class ReviewExtractor {
     for (const pattern of patterns) {
       const match = html.match(pattern);
       if (match) {
-        return match[1];
+        this.logger.debug('正则提取头像成功');
+        return { avatarUrl: match[1], frameUrl: null };
       }
     }
 
     this.logger.warn('未能提取用户头像');
-    return null;
+    return { avatarUrl: null, frameUrl: null };
   }
 
   /**
@@ -1928,6 +1999,24 @@ class UIRenderer {
     const avatarUrl = review.userAvatar ||
       'https://avatars.fastly.steamstatic.com/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_medium.jpg';
 
+    // 头像框（如果有）
+    const avatarFrameUrl = review.avatarFrame;
+
+    // 构建头像HTML（支持头像框）
+    let avatarHtml = '';
+    if (avatarFrameUrl) {
+      // 有头像框：使用双层结构
+      avatarHtml = `
+        <div class="frf_avatar_container">
+          <img src="${avatarUrl}" class="frf_avatar_img">
+          <img src="${avatarFrameUrl}" class="frf_avatar_frame">
+        </div>
+      `;
+    } else {
+      // 无头像框：普通单层头像
+      avatarHtml = `<img src="${avatarUrl}" class="frf_avatar_img">`;
+    }
+
     // 格式化日期显示（发布于 + 更新于）
     let dateText = `发布于：${review.publishDate}`;
     if (review.updateDate) {
@@ -1966,7 +2055,7 @@ class UIRenderer {
         <div class="frf_author_row">
           <div class="frf_author_left">
             <a href="${review.userProfileUrl}" class="frf_avatar_link">
-              <img src="${avatarUrl}" class="frf_avatar_img">
+              ${avatarHtml}
             </a>
             <div class="frf_author_info">
               <a href="${review.userProfileUrl}" class="frf_author_name">${review.userName}</a>
@@ -2517,12 +2606,31 @@ class UIRenderer {
         text-align: left;
       }
 
+      /* 头像容器（用于头像框场景） */
+      .frf_avatar_container {
+        position: relative;
+        width: 32px;
+        height: 32px;
+        display: block;
+      }
+
       .frf_avatar_img {
         width: 32px;
         height: 32px;
         display: block;
         margin: 0;
         object-fit: cover;
+      }
+
+      /* 头像框：绝对定位覆盖在头像上方 */
+      .frf_avatar_frame {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 32px;
+        height: 32px;
+        pointer-events: none;
+        z-index: 1;
       }
 
       .frf_author_info {
