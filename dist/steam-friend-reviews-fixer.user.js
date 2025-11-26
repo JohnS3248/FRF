@@ -2,7 +2,7 @@
 // @name         Steam 好友评测修复工具
 // @name:en      Steam Friend Reviews Fixer
 // @namespace    https://github.com/JohnS3248/FRF
-// @version      5.2.1
+// @version      5.3.0
 // @description  自动修复 Steam 好友评测页面渲染 Bug，显示完整的好友评测列表
 // @description:en Auto-fix Steam friend reviews rendering bug, display complete friend review list
 // @author       JohnS3248
@@ -31,7 +31,7 @@
 
 const Constants = {
   // ==================== 版本信息 ====================
-  VERSION: '5.2.1',
+  VERSION: '5.3.0',
   CACHE_VERSION: 'v2', // 渐进式缓存版本
 
   // ==================== 请求配置 ====================
@@ -2186,27 +2186,6 @@ class UIRenderer {
         <!-- 评测内容 -->
         <div class="frf_content_row">${displayContent}</div>
 
-        <!-- 投票按钮栏 -->
-        ${review.recommendationId ? `
-        <div class="frf_vote_row">
-          <span class="frf_vote_label">这篇评测是否有价值？</span>
-          <div class="frf_vote_buttons">
-            <button class="frf_vote_btn frf_vote_yes${review.votedUp ? ' voted' : ''}" data-action="rate" data-value="true" data-id="${review.recommendationId}" title="是">
-              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>
-              <span>是</span>
-            </button>
-            <button class="frf_vote_btn frf_vote_no${review.votedDown ? ' voted' : ''}" data-action="rate" data-value="false" data-id="${review.recommendationId}" title="否">
-              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>
-              <span>否</span>
-            </button>
-            <button class="frf_vote_btn frf_vote_funny${review.votedFunny ? ' voted' : ''}" data-action="funny" data-value="true" data-id="${review.recommendationId}" title="欢乐">
-              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z"/></svg>
-              <span>欢乐</span>
-            </button>
-          </div>
-        </div>
-        ` : ''}
-
         <!-- 底部用户信息栏 -->
         <div class="frf_author_row">
           <div class="frf_author_left">
@@ -2218,11 +2197,26 @@ class UIRenderer {
               <div class="frf_author_tag">${review.hoursAtReview ? `评测时 ${review.hoursAtReview} 小时` : ''}</div>
             </div>
           </div>
-          <div class="frf_comment_area">
-            <svg class="frf_comment_icon" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M21 6h-2V3c0-1.1-.9-2-2-2H3c-1.1 0-2 .9-2 2v14l4-4h7v4c0 1.1.9 2 2 2h7l4 4V8c0-1.1-.9-2-2-2zM5 11c-.83 0-1.5-.67-1.5-1.5S4.17 8 5 8s1.5.67 1.5 1.5S5.83 11 5 11zm4 0c-.83 0-1.5-.67-1.5-1.5S8.17 8 9 8s1.5.67 1.5 1.5S9.83 11 9 11zm4 0c-.83 0-1.5-.67-1.5-1.5S12.17 8 13 8s1.5.67 1.5 1.5S13.83 11 13 11z"/>
-            </svg>
-            <span class="frf_comment_count">${review.commentCount || 0}</span>
+          <div class="frf_author_right">
+            ${review.recommendationId ? `
+            <div class="frf_vote_buttons">
+              <button class="frf_vote_btn frf_vote_yes${review.votedUp ? ' voted' : ''}" data-action="rate" data-value="true" data-id="${review.recommendationId}" title="是">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>
+              </button>
+              <button class="frf_vote_btn frf_vote_no${review.votedDown ? ' voted' : ''}" data-action="rate" data-value="false" data-id="${review.recommendationId}" title="否">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>
+              </button>
+              <button class="frf_vote_btn frf_vote_funny${review.votedFunny ? ' voted' : ''}" data-action="funny" data-value="true" data-id="${review.recommendationId}" title="欢乐">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z"/></svg>
+              </button>
+            </div>
+            ` : ''}
+            <div class="frf_comment_area">
+              <svg class="frf_comment_icon" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M21 6h-2V3c0-1.1-.9-2-2-2H3c-1.1 0-2 .9-2 2v14l4-4h7v4c0 1.1.9 2 2 2h7l4 4V8c0-1.1-.9-2-2-2zM5 11c-.83 0-1.5-.67-1.5-1.5S4.17 8 5 8s1.5.67 1.5 1.5S5.83 11 5 11zm4 0c-.83 0-1.5-.67-1.5-1.5S8.17 8 9 8s1.5.67 1.5 1.5S9.83 11 9 11zm4 0c-.83 0-1.5-.67-1.5-1.5S12.17 8 13 8s1.5.67 1.5 1.5S13.83 11 13 11z"/>
+              </svg>
+              <span class="frf_comment_count">${review.commentCount || 0}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -2647,10 +2641,10 @@ class UIRenderer {
 
     if (result && result.success) {
       // 获取同一卡片内的所有投票按钮
-      const voteRow = btn.closest('.frf_vote_row');
-      const yesBtn = voteRow.querySelector('.frf_vote_yes');
-      const noBtn = voteRow.querySelector('.frf_vote_no');
-      const funnyBtn = voteRow.querySelector('.frf_vote_funny');
+      const voteButtons = btn.closest('.frf_vote_buttons');
+      const yesBtn = voteButtons.querySelector('.frf_vote_yes');
+      const noBtn = voteButtons.querySelector('.frf_vote_no');
+      const funnyBtn = voteButtons.querySelector('.frf_vote_funny');
 
       // 三者互斥：点击任何一个，取消其他两个
       yesBtn.classList.remove('voted');
@@ -2996,93 +2990,71 @@ class UIRenderer {
         opacity: 0.9;
       }
 
-      /* 投票按钮栏 */
-      .frf_vote_row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 10px 14px;
-        border-top: 1px solid rgba(255, 255, 255, 0.05);
-        background: rgba(0, 0, 0, 0.15);
-      }
-
-      .frf_vote_label {
-        font-size: 12px;
-        color: #8f98a0;
-      }
-
+      /* 投票按钮 */
       .frf_vote_buttons {
         display: flex;
-        gap: 8px;
+        align-items: center;
+        gap: 6px;
+        margin-right: 12px;
       }
 
       .frf_vote_btn {
         display: flex;
         align-items: center;
-        gap: 4px;
-        padding: 6px 12px;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        padding: 0;
         border: none;
-        border-radius: 2px;
-        background: rgba(103, 193, 245, 0.15);
-        color: #67c1f5;
-        font-size: 12px;
+        border-radius: 4px;
+        background: transparent;
+        color: #8f98a0;
         cursor: pointer;
         transition: all 0.2s;
       }
 
       .frf_vote_btn:hover {
-        background: rgba(103, 193, 245, 0.3);
+        background: rgba(255, 255, 255, 0.1);
+        color: #c6d4df;
       }
 
       .frf_vote_btn:active {
-        transform: scale(0.95);
-      }
-
-      .frf_vote_btn.voted {
-        background: #67c1f5;
-        color: #1b2838;
+        transform: scale(0.9);
       }
 
       .frf_vote_btn.loading {
-        opacity: 0.6;
+        opacity: 0.5;
         pointer-events: none;
       }
 
       .frf_vote_btn svg {
-        width: 14px;
-        height: 14px;
+        width: 16px;
+        height: 16px;
         fill: currentColor;
       }
 
-
       .frf_vote_yes:hover {
-        background: rgba(76, 175, 80, 0.3);
         color: #4caf50;
       }
 
       .frf_vote_yes.voted {
-        background: #4caf50;
-        color: #fff;
+        color: #4caf50;
       }
 
       .frf_vote_no:hover {
-        background: rgba(244, 67, 54, 0.3);
         color: #f44336;
       }
 
       .frf_vote_no.voted {
-        background: #f44336;
-        color: #fff;
+        color: #f44336;
       }
 
       .frf_vote_funny:hover {
-        background: rgba(255, 193, 7, 0.3);
         color: #ffc107;
       }
 
       .frf_vote_funny.voted {
-        background: #ffc107;
-        color: #1b2838;
+        color: #ffc107;
       }
 
       /* 底部用户信息栏 */
@@ -3100,6 +3072,11 @@ class UIRenderer {
         align-items: center;
         gap: 10px;
         flex-shrink: 0;
+      }
+
+      .frf_author_right {
+        display: flex;
+        align-items: center;
       }
 
       .frf_avatar_link {
