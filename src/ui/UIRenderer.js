@@ -301,6 +301,13 @@ class UIRenderer {
     card.addEventListener('click', (e) => {
       // 如果点击的是链接、图片或按钮，不处理
       if (e.target.tagName === 'A' || e.target.tagName === 'IMG' || e.target.closest('a') || e.target.closest('button')) return;
+
+      // 如果用户正在选择文字，不跳转
+      const selection = window.getSelection();
+      if (selection && selection.toString().trim().length > 0) {
+        return;
+      }
+
       window.open(`https://steamcommunity.com${review.url}`, '_blank');
     });
 
